@@ -186,24 +186,24 @@ pub struct LR35902Cpu<'a> {
 
 #[derive(Default, Debug)]
 pub struct Registers {
-    pub A: u8,
-    pub F: Flags,
-    pub B: u8,
-    pub C: u8,
-    pub D: u8,
-    pub E: u8,
-    pub H: u8,
-    pub L: u8,
-    pub SP: u16,
-    pub PC: u16,
+    pub a: u8,
+    pub f: Flags,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
+    pub h: u8,
+    pub l: u8,
+    pub sp: u16,
+    pub pc: u16,
 }
 
 #[derive(Default, Debug)]
 pub struct Flags {
-    pub Z: bool,
-    pub N: bool,
-    pub H: bool,
-    pub C: bool,
+    pub z: bool,
+    pub n: bool,
+    pub h: bool,
+    pub c: bool,
 }
 
 impl<'a> LR35902Cpu<'a> {
@@ -213,7 +213,7 @@ impl<'a> LR35902Cpu<'a> {
             mem,
             regs: Default::default()
         };
-        cpu.regs.PC = start_pc;
+        cpu.regs.pc = start_pc;
         cpu
     }
     // TODO: This should be changed to read from the bus object instead of directly from mem
@@ -223,11 +223,11 @@ impl<'a> LR35902Cpu<'a> {
 
 
     fn pc(&self) -> u16 {
-        self.regs.PC
+        self.regs.pc
     }
 
     fn set_pc(&mut self, pc: u16) {
-        self.regs.PC = pc;
+        self.regs.pc = pc;
     }
 
     /*
@@ -322,8 +322,7 @@ fn test_disasm() {
                        0x06, // ld b, n (0xff) 
                        0xff,
                        0x03]; // inc b
-    let mut pc = 0;
-    let mut cpu = LR35902Cpu::new(pc, &code_buffer);
+    let mut cpu = LR35902Cpu::new(0, &code_buffer);
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.read8(cpu.pc()); 
         let oplen = cpu.disasm(opcode) as usize;
