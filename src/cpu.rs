@@ -30,7 +30,7 @@ impl<const V: u8> ConstEval<V> {
  *       N is the length of instruction in bytes
  */
 #[rustfmt::skip]
-macro_rules! use_z80_opcodes {
+macro_rules! use_z80_table {
     ($run_macro:ident) => { indexing!($run_macro  @start:
          /*       00               01              02              03             04              05              06              07             */ 
          /* 00 */ nop :1;          ld bc, nn :3;   ld (bc), a :1;  inc bc :1;     inc b :1;       dec b :1;       ld b, n :2;    rlca :1;
@@ -41,11 +41,43 @@ macro_rules! use_z80_opcodes {
          /* 28 */ jr z, n :2;      add hl, hl :1;  ld a, (hl+) :1; dec hl :1;     inc l :1;       dec l :1;       ld l, n :2;    cpl :1;
          /* 30 */ jr nc, n :2;     ld sp, nn :3;   ld (hl-), a :1; inc sp :1;     inc (hl) :1;    dec (hl) :1;    ld (hl), n :2; scf :1;
          /* 38 */ jr c, n :2;      add hl, sp :1;  ld a, (hl-) :1; dec sp :1;     inc a :1;       dec a :1;       ld a, n :2;    ccf :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 50 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 60 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 70 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 80 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 90 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* A0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* B0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* C0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* C8 */ TODO :1; TODO :1; TODO :1; cb :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* D0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* E0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* F0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* F8 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
             
     )
     }
 }
 
+#[rustfmt::skip]
+macro_rules! use_z80_cb_table {
+    ($run_macro:ident) => { indexing!($run_macro @start:
+         /*       00               01              02              03             04              05              06              07             */ 
+         /* 00 */ TODO :1; 
+    )
+    }
+}
 /*
  * process each element of table, creating a list of entries with it's associated index code
  * is this what is called a tt muncher? 
@@ -81,19 +113,19 @@ macro_rules! indexing {
 
 macro_rules! gen_a_z80_handler {
     ($mne:ident [] $n:expr) => { 
-        gen_mne!($mne $n)
+        gen_exec_mne!($mne $n)
     };
 
     ($mne:ident [$opr:tt] $n:expr) => {
-        gen_mne!($mne $opr $n)
+        gen_exec_mne!($mne $opr $n)
     };
 
     ($mne:ident [$dst:tt, $src:tt] $n:expr) => {
-        gen_mne!($mne $dst $src $n)
+        gen_exec_mne!($mne $dst $src $n)
     };
 }
 
-macro_rules! gen_mne {
+macro_rules! gen_exec_mne {
     (nop $n:expr) => { {
         println!("{} bytes: {}", $n, "nop");
         ($n as u8)
@@ -176,6 +208,18 @@ macro_rules! gen_mne {
         ($n as u8)
     }};
 
+    // CB prefix 
+    (cb $n:expr) => {{
+        use_z80_cb_table!(gen_z80_exec_cb_handlers)
+    }};
+
+
+    (TODO $n:expr) => {{
+        todo!();
+        ($n as u8)
+    }};
+        
+
 }
 
 
@@ -238,10 +282,55 @@ impl<'a> LR35902Cpu<'a> {
      * be used to drive the rest of the disassembly
      */
     fn disasm(&self, opc: u8) -> u8 {
-        /* generates a function do_it(opc: u8) that for now just decodes
-         * opcode and prints out the disassembled instruction
+
+        macro_rules! gen_z80_disasm_handlers {
+            ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {
+                match opc {
+                    $( ConstEval::<{$ix}>::VALUE => {
+                        gen_z80_disasm_handlers!(@one $mne $opr $n)
+                    }, )*
+                    _=> { panic!("problem!"); }
+                }
+            };
+
+            (@one $mne:ident [] $n:expr) => {{
+                let dasm = stringify!($mne);
+                println!("{}", dasm);
+                ($n as u8)
+            }};
+
+            (@one $mne:ident [$opr:tt] $n:expr) => {{
+                let dasm = format!("{} {}", stringify!($mne), stringify!($opr));
+                println!("{}", dasm);
+                ($n as u8)
+            }};
+
+            (@one $mne:ident [$dst:tt, $src:tt] $n:expr) => {{
+                let dasm = format!("{} {}, {}", stringify!($mne), stringify!($dst), stringify!($src));
+                println!("{}", dasm);
+                ($n as u8)
+
+            }};
+
+            (@one cb [] $n:expr) => {{
+                let dasm = "cb dasm unimplemented!";
+                println!("{}", dasm);
+                ($n as u8)
+            }};
+        }
+
+        use_z80_table!(gen_z80_disasm_handlers)
+
+    }
+
+
+    fn exec_one_instruction(&mut self) -> u8 {
+        let opc = self.read8(self.pc());
+
+        /* generates a match clause to handle opcodes
+         * prints out the disassembled instruction
          */
-        macro_rules! gen_z80_handlers {
+        macro_rules! gen_z80_exec_handlers {
             ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {
                 match opc {
                     $( ConstEval::<{$ix}>::VALUE => {
@@ -250,6 +339,22 @@ impl<'a> LR35902Cpu<'a> {
                     _=> { panic!("problem!"); }
                 }
             }
+        }
+
+        /* generates a sub match clause to handle CB prefix instructions
+         *
+         */
+
+        macro_rules! gen_z80_exec_cb_handlers {
+            ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {{
+                let  opc_cb = self.read8(self.pc().wrapping_add(1));
+                match opc_cb {
+                    $( ConstEval::<{$ix}>::VALUE => {
+                        gen_a_z80_handler!($mne $opr $n)
+                    }, )*
+                    _=> { panic!("problem!"); }
+                }
+            }}
         }
        
         /* note: this macro must be declared inside disasm() because it 
@@ -302,12 +407,9 @@ impl<'a> LR35902Cpu<'a> {
                 todo!();
                 0
             }};
-
-
         }
 
-        use_z80_opcodes!(gen_z80_handlers)
-
+        use_z80_table!(gen_z80_exec_handlers)
     }
 
 }
@@ -323,9 +425,15 @@ fn test_disasm() {
                        0xff,
                        0x03]; // inc b
     let mut cpu = LR35902Cpu::new(0, &code_buffer);
+    /*
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.read8(cpu.pc()); 
         let oplen = cpu.disasm(opcode) as usize;
+        cpu.set_pc(cpu.pc() + (oplen as u16));
+    }
+    */
+    while cpu.pc() < (code_buffer.len() as u16) {
+        let oplen = cpu.exec_one_instruction() as usize;
         cpu.set_pc(cpu.pc() + (oplen as u16));
     }
 }
