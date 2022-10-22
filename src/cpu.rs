@@ -39,7 +39,8 @@ macro_rules! use_z80_opcodes {
          /* 18 */ jr n :2;         add hl, de :1;  ld a, (de) :1;  dec de :1;     inc e :1;       dec e :1;       ld e, n :2;    rra :1;
          /* 20 */ jr nz, n :2;     ld hl, nn :3;   ld (hl+), a :1; inc hl :1;     inc h :1;       dec h :1;       ld h, n :2;    daa :1;
          /* 28 */ jr z, n :2;      add hl, hl :1;  ld a, (hl+) :1; dec hl :1;     inc l :1;       dec l :1;       ld l, n :2;    cpl :1;
-         /* 30 */ 
+         /* 30 */ jr nc, n :2;     ld sp, nn :3;   ld (hl-), a :1; inc sp :1;     inc (hl) :1;    dec (hl) :1;    ld (hl), n :2; scf :1;
+         /* 38 */ jr c, n :2;      add hl, sp :1;  ld a, (hl-) :1; dec sp :1;     inc a :1;       dec a :1;       ld a, n :2;    ccf :1;
             
     )
     }
@@ -165,22 +166,55 @@ macro_rules! gen_mne {
         ($n as u8)
     }};
 
+    (scf $n:expr) => {{
+        println!("{} bytes: scf", $n);
+        ($n as u8)
+    }};
+
+    (ccf $n:expr) => {{
+        println!("{} bytes: ccf", $n);
+        ($n as u8)
+    }};
+
 }
 
 
 pub struct LR35902Cpu<'a> {
     mem: &'a [u8],
-    pc: u16,
+    regs: Registers,
 }
 
+#[derive(Default, Debug)]
+pub struct Registers {
+    pub A: u8,
+    pub F: Flags,
+    pub B: u8,
+    pub C: u8,
+    pub D: u8,
+    pub E: u8,
+    pub H: u8,
+    pub L: u8,
+    pub SP: u16,
+    pub PC: u16,
+}
+
+#[derive(Default, Debug)]
+pub struct Flags {
+    pub Z: bool,
+    pub N: bool,
+    pub H: bool,
+    pub C: bool,
+}
 
 impl<'a> LR35902Cpu<'a> {
 
     fn new(start_pc: u16, mem: &'a[u8]) -> Self {
-        LR35902Cpu {
+        let mut cpu = LR35902Cpu {
             mem,
-            pc: start_pc
-        }
+            regs: Default::default()
+        };
+        cpu.regs.PC = start_pc;
+        cpu
     }
     // TODO: This should be changed to read from the bus object instead of directly from mem
     fn read8(&self, addr: u16) -> u8 {
@@ -189,11 +223,11 @@ impl<'a> LR35902Cpu<'a> {
 
 
     fn pc(&self) -> u16 {
-        self.pc
+        self.regs.PC
     }
 
     fn set_pc(&mut self, pc: u16) {
-        self.pc = pc;
+        self.regs.PC = pc;
     }
 
     /*
@@ -225,12 +259,12 @@ impl<'a> LR35902Cpu<'a> {
          */
         macro_rules! load {
             (n) => {{
-                self.read8(self.pc.wrapping_add(1))
+                self.read8(self.pc().wrapping_add(1))
             }};
 
             (nn) => {{
-                let lo = self.read8(self.pc.wrapping_add(1));
-                let hi = self.read8(self.pc.wrapping_add(2));
+                let lo = self.read8(self.pc().wrapping_add(1));
+                let hi = self.read8(self.pc().wrapping_add(2));
                 lo as u16 | ((hi as u16) << 8)
             }};
 
@@ -258,10 +292,17 @@ impl<'a> LR35902Cpu<'a> {
                 todo!();
                 0
             }};
+
             ((hl+)) => {{
                 todo!();
                 0
             }};
+
+            ((hl-)) => {{
+                todo!();
+                0
+            }};
+
 
         }
 
