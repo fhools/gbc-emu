@@ -1,0 +1,17 @@
+[package]
+name = "gbc-emu"
+version = "0.1.0"
+edition = "2021"
+author = "fhools"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "gbc-emu"
+path = "src/bin/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
