@@ -1,4 +1,6 @@
 
+use crate::bus::Bus;
+use crate::util::Shared;
 pub struct ConstEval<const V: u8>;
 
 impl<const V: u8> ConstEval<V> {
@@ -111,123 +113,23 @@ macro_rules! indexing {
 
 
 
-macro_rules! gen_a_z80_handler {
-    ($mne:ident [] $n:expr) => { 
-        gen_exec_mne!($mne $n)
-    };
-
-    ($mne:ident [$opr:tt] $n:expr) => {
-        gen_exec_mne!($mne $opr $n)
-    };
-
-    ($mne:ident [$dst:tt, $src:tt] $n:expr) => {
-        gen_exec_mne!($mne $dst $src $n)
-    };
-}
-
-macro_rules! gen_exec_mne {
-    (nop $n:expr) => { {
-        println!("{} bytes: {}", $n, "nop");
-        ($n as u8)
-    }};
-
-    (ld $dst:tt $src:tt $n:expr) => {{
-        let _srcval = load!($src);
-        println!("{} bytes: ld {} = {}", $n, stringify!($dst), _srcval);
-        ($n as u8)
-    }};
-
-    (inc $opr:tt $n:expr) => {{
-        println!("{} bytes: inc {}", $n, stringify!($opr));
-        ($n as u8)
-    }};
-
-    (dec $opr:tt $n:expr) => {{
-        println!("{} bytes: inc {}", $n, stringify!($opr));
-        ($n as u8)
-    }};
-
-    (add $dst:tt $src:tt $n:expr) => {{
-        println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!(src));
-        ($n as u8)
-    }};
 
 
-    (jr n $n:expr) => {{
-        println!("{} bytes: jr n", $n);
-        ($n as u8)
-    }};
-
-    (jr $op1:tt $op2:tt $n:expr) => {{
-        println!("{} bytes: jr {}, {}", $n, stringify!($op1), stringify!($op2));
-        ($n as u8)
-    }};
-    
-    (stop $n:expr) => {{
-        println!("{} bytes: stop", $n);
-        ($n as u8)
-    }};
-
-    (rra $n:expr)  => {{
-        println!("{} bytes: rra", $n);
-        ($n as u8)
-    }};
-    
-    (rla $n:expr)  => {{
-        println!("{} bytes: rla", $n);
-        ($n as u8)
-    }};
-    
-    (rlca $n:expr)  => {{
-        println!("{} bytes: rlca", $n);
-        ($n as u8)
-    }};
-    
-    (rrca $n:expr)  => {{
-        println!("{} bytes: rrca", $n);
-        ($n as u8)
-    }};
-    
-    (cpl $n:expr) => {{
-        println!("{} bytes: cpl", $n);
-        ($n as u8)
-    }};
-
-    (daa $n:expr) => {{
-        println!("{} bytes: daa", $n);
-        ($n as u8)
-    }};
-
-    (scf $n:expr) => {{
-        println!("{} bytes: scf", $n);
-        ($n as u8)
-    }};
-
-    (ccf $n:expr) => {{
-        println!("{} bytes: ccf", $n);
-        ($n as u8)
-    }};
-
-    // CB prefix 
-    (cb $n:expr) => {{
-        use_z80_cb_table!(gen_z80_exec_cb_handlers)
-    }};
-
-
-    (TODO $n:expr) => {{
-        todo!();
-        ($n as u8)
-    }};
-        
-
-}
-
-
-pub struct LR35902Cpu<'a> {
-    mem: &'a [u8],
-    regs: Registers,
-}
-
+/* Registers is the backing storage for the cpu registers.
+ *
+ * An interesting thing about Z80 is that the instruction
+ * set may load and store to registers as either 8-bit
+ * or as 16-bit.
+ *
+ * 16-bit registers are comprised of 2-bit registers:
+ *
+ * AF = A  + flags (bits 7-4) bits 3-0 are zero always??
+ * BC = B + C 
+ * DE = D + E
+ * HL = H + L
+ * SP is true 16-bit register
+ * PC is true 16-bit register
+ */
 #[derive(Default, Debug)]
 pub struct Registers {
     pub a: u8,
@@ -242,6 +144,55 @@ pub struct Registers {
     pub pc: u16,
 }
 
+impl Registers {
+    pub fn bc(&self) -> u16 {
+        self.c as u16 | ((self.b as u16) << 8)
+    }
+
+    pub fn set_bc(&mut self, bc: u16) {
+        self.b = (bc >> 8) as u8 & 0xFF;
+        self.c = (bc & 0xFF) as u8;
+    }
+
+    pub fn hl(&self) -> u16 {
+        self.l as u16 | ((self.h as u16) << 8)
+    }
+
+    pub fn set_hl(&mut self, hl: u16) {
+        self.h = (hl >> 8) as u8 & 0xFF;
+        self.l = (hl & 0xFF) as u8;
+    }
+
+    pub fn de(&self) -> u16 {
+        self.e as u16 | ((self.d as u16) << 8)
+    }
+
+    pub fn set_de(&mut self, hl: u16) {
+        self.d = (hl >> 8) as u8 & 0xFF;
+        self.e = (hl & 0xFF) as u8;
+    }
+
+    pub fn af(&self) -> u16 {
+        let flags = ((self.f.z as u8) << 7) |
+                    ((self.f.n as u8) << 6) |
+                    ((self.f.h as u8) << 5) |
+                    ((self.f.c as u8) << 4);
+
+        flags as u16 | ((self.a as u16) << 8)
+    }
+
+
+    pub fn set_af(&mut self, af: u16)  {
+        self.a = (af >> 8) as u8 & 0xFF;
+        self.f.z = ((af >> 7) & 0x1) == 1;
+        self.f.n = ((af >> 6) & 0x1) == 1;
+        self.f.h = ((af >> 5) & 0x1) == 1;
+        self.f.c = ((af >> 4) & 0x1) == 1;
+    }
+
+
+
+}
 #[derive(Default, Debug)]
 pub struct Flags {
     pub z: bool,
@@ -250,19 +201,29 @@ pub struct Flags {
     pub c: bool,
 }
 
-impl<'a> LR35902Cpu<'a> {
+/*
+ * The LR35902 is a Z80 compatible CPU made by Sharp
+ * In the Gameboy Color it runs at 8.2 Mhz
+ *
+ */
+pub struct LR35902Cpu {
+    bus: Shared<Bus>,
+    regs: Registers,
+}
 
-    fn new(start_pc: u16, mem: &'a[u8]) -> Self {
+impl LR35902Cpu {
+
+    fn new(start_pc: u16, bus: Shared<Bus>) -> Self {
         let mut cpu = LR35902Cpu {
-            mem,
+            bus,
             regs: Default::default()
         };
         cpu.regs.pc = start_pc;
         cpu
     }
-    // TODO: This should be changed to read from the bus object instead of directly from mem
-    fn read8(&self, addr: u16) -> u8 {
-        self.mem[addr as usize]
+
+    fn load8(&self, addr: u16) -> u8 {
+        self.bus.read8(addr)
     }
 
 
@@ -325,7 +286,128 @@ impl<'a> LR35902Cpu<'a> {
 
 
     fn exec_one_instruction(&mut self) -> u8 {
-        let opc = self.read8(self.pc());
+        let opc = self.load8(self.pc());
+
+        macro_rules! gen_a_z80_handler {
+            ($mne:ident [] $n:expr) => { 
+                gen_exec_mne!($mne $n)
+            };
+
+            ($mne:ident [$opr:tt] $n:expr) => {
+                gen_exec_mne!($mne $opr $n)
+            };
+
+            ($mne:ident [$dst:tt, $src:tt] $n:expr) => {
+                gen_exec_mne!($mne $dst $src $n)
+            };
+        }
+
+        macro_rules! gen_exec_mne {
+            (nop $n:expr) => { {
+                println!("{} bytes: {}", $n, "nop");
+                ($n as u8)
+            }};
+
+            (ld $dst:tt $src:tt $n:expr) => {{
+                let _srcval = load!($src);
+                println!("{} bytes: ld {} = {}", $n, stringify!($dst), _srcval);
+                ($n as u8)
+            }};
+
+            (inc $opr:tt $n:expr) => {{
+                let val = load!($opr);
+                if std::mem::size_of_val(&val) == 1 {
+                    println!("incrementing u8 register");
+                    let val: u8 = val as u8;
+                    store!($opr, val.wrapping_add(1));
+                } else {
+                    println!("incrementing u16 register");
+                    let val: u16 = val as u16;
+                    store!($opr, val.wrapping_add(1));
+                }
+                println!("{} bytes: inc {}", $n, stringify!($opr));
+                ($n as u8)
+            }};
+
+            (dec $opr:tt $n:expr) => {{
+                println!("{} bytes: inc {}", $n, stringify!($opr));
+                ($n as u8)
+            }};
+
+            (add $dst:tt $src:tt $n:expr) => {{
+                println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!(src));
+                ($n as u8)
+            }};
+
+
+            (jr n $n:expr) => {{
+                println!("{} bytes: jr n", $n);
+                ($n as u8)
+            }};
+
+            (jr $op1:tt $op2:tt $n:expr) => {{
+                println!("{} bytes: jr {}, {}", $n, stringify!($op1), stringify!($op2));
+                ($n as u8)
+            }};
+
+            (stop $n:expr) => {{
+                println!("{} bytes: stop", $n);
+                ($n as u8)
+            }};
+
+            (rra $n:expr)  => {{
+                println!("{} bytes: rra", $n);
+                ($n as u8)
+            }};
+
+            (rla $n:expr)  => {{
+                println!("{} bytes: rla", $n);
+                ($n as u8)
+            }};
+
+            (rlca $n:expr)  => {{
+                println!("{} bytes: rlca", $n);
+                ($n as u8)
+            }};
+
+            (rrca $n:expr)  => {{
+                println!("{} bytes: rrca", $n);
+                ($n as u8)
+            }};
+
+            (cpl $n:expr) => {{
+                println!("{} bytes: cpl", $n);
+                ($n as u8)
+            }};
+
+            (daa $n:expr) => {{
+                println!("{} bytes: daa", $n);
+                ($n as u8)
+            }};
+
+            (scf $n:expr) => {{
+                println!("{} bytes: scf", $n);
+                ($n as u8)
+            }};
+
+            (ccf $n:expr) => {{
+                println!("{} bytes: ccf", $n);
+                ($n as u8)
+            }};
+
+            // CB prefix 
+            (cb $n:expr) => {{
+                use_z80_cb_table!(gen_z80_exec_cb_handlers)
+            }};
+
+
+            (TODO $n:expr) => {{
+                todo!("unknown opcode:{:x}", opc);
+                ($n as u8)
+            }};
+
+
+        }
 
         /* generates a match clause to handle opcodes
          * prints out the disassembled instruction
@@ -347,7 +429,7 @@ impl<'a> LR35902Cpu<'a> {
 
         macro_rules! gen_z80_exec_cb_handlers {
             ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {{
-                let  opc_cb = self.read8(self.pc().wrapping_add(1));
+                let  opc_cb = self.load8(self.pc().wrapping_add(1));
                 match opc_cb {
                     $( ConstEval::<{$ix}>::VALUE => {
                         gen_a_z80_handler!($mne $opr $n)
@@ -364,18 +446,13 @@ impl<'a> LR35902Cpu<'a> {
          */
         macro_rules! load {
             (n) => {{
-                self.read8(self.pc().wrapping_add(1))
+                self.load8(self.pc())
             }};
 
             (nn) => {{
-                let lo = self.read8(self.pc().wrapping_add(1));
-                let hi = self.read8(self.pc().wrapping_add(2));
+                let lo = self.load8(self.pc().wrapping_add(1));
+                let hi = self.load8(self.pc().wrapping_add(2));
                 lo as u16 | ((hi as u16) << 8)
-            }};
-
-            ((b)) => {{
-                todo!();
-               0 
             }};
 
             ((bc)) => {{
@@ -393,11 +470,52 @@ impl<'a> LR35902Cpu<'a> {
                 0
             }};
 
-            (a) => {{
-                todo!();
-                0
+            (a) => {
+                self.regs.a
+            };
+
+
+            (b) => {
+                self.regs.b as u8
+            };
+
+            (c) => {
+                self.regs.c as u8
+            };
+
+            (d) => {
+                self.regs.d as u8
+            };
+
+            (e) => {
+                self.regs.e as u8
+            };
+
+            (h) => {
+                self.regs.h as u8
+            };
+
+            (l) => {{
+                self.regs.l as u8
             }};
 
+
+            (de) => {
+                self.regs.de() as u16
+            };
+
+            (hl) => {
+                self.regs.hl() as u16
+            };
+
+            (sp) => {{
+                self.regs.sp
+            }};
+
+            ((hl)) => {{
+                self.regs.hl()
+            }};
+            
             ((hl+)) => {{
                 todo!();
                 0
@@ -407,9 +525,73 @@ impl<'a> LR35902Cpu<'a> {
                 todo!();
                 0
             }};
+
+            (bc) => {
+                self.regs.bc() as u16
+            };
         }
 
-        use_z80_table!(gen_z80_exec_handlers)
+
+        macro_rules! store {
+            (a, $val:expr) => {{
+                self.regs.a = $val as u8;
+            }};
+            (b, $val:expr) => {{
+                self.regs.b = $val as u8;
+            }};
+
+            (h, $val:expr) => {{
+                todo!();
+            }};
+
+            (l, $val:expr) => {{
+                todo!();
+            }};
+
+            (c, $val:expr) => {{
+                todo!();
+            }};
+
+            (d, $val:expr) => {{
+                todo!();
+            }};
+
+            (e, $val:expr) => {{
+                todo!();
+            }};
+    
+            (bc, $val:expr) => {{
+                self.regs.set_bc($val as u16);
+            }};
+
+            (de, $val:expr) => {{
+                todo!();
+            }};
+
+            (sp, $val:expr) => {{
+                self.regs.sp = $val as u16; 
+            }};
+
+            ((hl), $val:expr) => {{
+                todo!();
+            }};
+
+            (hl, $val:expr) => {{
+                todo!();
+            }};
+        }
+
+        let pc = self.pc();
+        self.set_pc(pc.wrapping_add(1));
+        let oplen = use_z80_table!(gen_z80_exec_handlers);
+        // TODO: actually implement updating pc, by 
+        // This is a horrible kludge, will not work because once we handle jumps and calls
+        // the pc will be set by those instructions, we dont want to automatically jump
+        // to the next instruction in sequence
+        if oplen > 1 {
+            self.set_pc(self.pc() + ((oplen - 1) as u16));
+        }
+        oplen
     }
 
 }
@@ -423,8 +605,9 @@ fn test_disasm() {
     let code_buffer = [0x00, // nop
                        0x06, // ld b, n (0xff) 
                        0xff,
-                       0x03]; // inc b
-    let mut cpu = LR35902Cpu::new(0, &code_buffer);
+                       0x03]; // inc bc
+    let bus = Shared::new(Bus::new(&code_buffer)); 
+    let mut cpu = LR35902Cpu::new(0, bus.clone());
     /*
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.read8(cpu.pc()); 
@@ -433,8 +616,7 @@ fn test_disasm() {
     }
     */
     while cpu.pc() < (code_buffer.len() as u16) {
-        let oplen = cpu.exec_one_instruction() as usize;
-        cpu.set_pc(cpu.pc() + (oplen as u16));
+        cpu.exec_one_instruction() as usize;
     }
 }
 
