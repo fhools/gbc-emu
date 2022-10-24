@@ -226,6 +226,9 @@ impl LR35902Cpu {
         self.bus.read8(addr)
     }
 
+    fn store8(&mut self, addr: u16, val: u8) {
+        self.bus.write8(addr, val);
+    }
 
     fn pc(&self) -> u16 {
         self.regs.pc
@@ -456,74 +459,82 @@ impl LR35902Cpu {
             }};
 
             ((bc)) => {{
-                todo!();
-               0 
+                let bc = self.regs.bc();
+                let lo = self.load8(bc);
+                let hi = self.load8(bc.wrapping_add(1));
+                lo as u16 | ((hi as u16) <<8)
             }};
 
             ((de)) => {{
-                todo!();
-               0 
+                let de = self.regs.de();
+                let lo = self.load8(de);
+                let hi = self.load8(de.wrapping_add(1));
+                lo as u16 | ((hi as u16) <<8)
             }};
 
             (sp)  => {{
-                todo!();
-                0
+                self.regs.sp 
             }};
 
             (a) => {
-                self.regs.a
+                self.regs.a 
             };
 
-
             (b) => {
-                self.regs.b as u8
+                self.regs.b
             };
 
             (c) => {
-                self.regs.c as u8
+                self.regs.c 
             };
 
             (d) => {
-                self.regs.d as u8
+                self.regs.d
             };
 
             (e) => {
-                self.regs.e as u8
+                self.regs.e
             };
 
             (h) => {
-                self.regs.h as u8
+                self.regs.h
             };
 
-            (l) => {{
-                self.regs.l as u8
-            }};
+            (l) => {
+                self.regs.l
+            };
 
 
             (de) => {
-                self.regs.de() as u16
+                self.regs.de() 
             };
 
             (hl) => {
-                self.regs.hl() as u16
+                self.regs.hl()
             };
 
-            (sp) => {{
+            (sp) => {
                 self.regs.sp
-            }};
+            };
 
             ((hl)) => {{
-                self.regs.hl()
+                let hl = self.regs.hl();
+                let lo = self.load8(hl);
+                lo 
             }};
             
             ((hl+)) => {{
-                todo!();
-                0
+                let hl = self.regs.hl();
+                let lo = self.load8(hl);
+                self.regs.set_hl(hl.wrapping_add(1));
+                lo 
             }};
 
             ((hl-)) => {{
-                todo!();
-                0
+                let hl = self.regs.hl();
+                let lo = self.load8(hl);
+                self.regs.set_hl(hl.wrapping_sub(1));
+                lo 
             }};
 
             (bc) => {
@@ -541,23 +552,23 @@ impl LR35902Cpu {
             }};
 
             (h, $val:expr) => {{
-                todo!();
+                self.regs.h = $val as u8;
             }};
 
             (l, $val:expr) => {{
-                todo!();
+                self.regs.l = $val as u8;
             }};
 
             (c, $val:expr) => {{
-                todo!();
+                self.regs.c = $val as u8;
             }};
 
             (d, $val:expr) => {{
-                todo!();
+                self.regs.d = $val as u8;
             }};
 
             (e, $val:expr) => {{
-                todo!();
+                self.regs.e = $val as u8;
             }};
     
             (bc, $val:expr) => {{
@@ -565,7 +576,7 @@ impl LR35902Cpu {
             }};
 
             (de, $val:expr) => {{
-                todo!();
+                self.regs.set_de($val as u16);
             }};
 
             (sp, $val:expr) => {{
@@ -573,21 +584,27 @@ impl LR35902Cpu {
             }};
 
             ((hl), $val:expr) => {{
-                todo!();
+                let addr = self.regs.hl();
+                let val = self.load8(addr);
+                self.store8(addr, val);
             }};
 
             (hl, $val:expr) => {{
-                todo!();
+                self.regs.set_hl($val as u16)
             }};
         }
 
         let pc = self.pc();
+        // add one to the pc, so that the instructions 
+        // that contains immediate data will load 
+        // from the correct bytes
         self.set_pc(pc.wrapping_add(1));
         let oplen = use_z80_table!(gen_z80_exec_handlers);
-        // TODO: actually implement updating pc, by 
+        // TODO: actually implement updating pc, 
         // This is a horrible kludge, will not work because once we handle jumps and calls
         // the pc will be set by those instructions, we dont want to automatically jump
-        // to the next instruction in sequence
+        // to the next instruction in sequence during execution, we can still use
+        // the following for disassembly though
         if oplen > 1 {
             self.set_pc(self.pc() + ((oplen - 1) as u16));
         }
