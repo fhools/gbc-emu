@@ -222,6 +222,22 @@ impl LR35902Cpu {
         cpu
     }
 
+    // load byte at pc and update pc, used for instructions that fetch data 
+    // has immediate data
+    fn fetch8(&mut self) -> u8 {
+        let byte = self.bus.read8(self.regs.pc);
+        self.set_pc(self.regs.pc + 1);
+        byte
+    }
+
+    // same as fetch8 but update pc twice and grab u16
+    fn fetch16(&mut self) -> u16 {
+        let lo = self.bus.read8(self.regs.pc);
+        let hi = self.bus.read8(self.regs.pc+1);
+        self.set_pc(self.regs.pc + 2);
+        (lo as u16) | ((hi as u16)<< 8)
+    }
+
     fn load8(&self, addr: u16) -> u8 {
         self.bus.read8(addr)
     }
@@ -289,7 +305,7 @@ impl LR35902Cpu {
 
 
     fn exec_one_instruction(&mut self) -> u8 {
-        let opc = self.load8(self.pc());
+        let opc = self.fetch8();
 
         macro_rules! gen_a_z80_handler {
             ($mne:ident [] $n:expr) => { 
@@ -312,21 +328,24 @@ impl LR35902Cpu {
             }};
 
             (ld $dst:tt $src:tt $n:expr) => {{
-                let _srcval = load!($src);
-                println!("{} bytes: ld {} = {}", $n, stringify!($dst), _srcval);
+                let srcval = load!($src);
+                store!($dst, srcval);
+                println!("{} bytes: ld {} = {:#x}", $n, stringify!($dst), srcval);
                 ($n as u8)
             }};
 
             (inc $opr:tt $n:expr) => {{
-                let val = load!($opr);
-                if std::mem::size_of_val(&val) == 1 {
-                    // TODO: update flags for carry, etc.
+                let prev_val = load!($opr);
+                if std::mem::size_of_val(&prev_val) == 1 {
                     println!("incrementing u8 register");
-                    let val: u8 = val as u8;
-                    store!($opr, val.wrapping_add(1));
+                    let val: u8 = prev_val.wrapping_add(1) as u8;
+                    self.regs.f.z = (val == 0);
+                    self.regs.f.n = false;
+                    self.regs.f.h = ((prev_val as u8) ^ val) & 0x10 != 0;
+                    store!($opr, val);
                 } else {
                     println!("incrementing u16 register");
-                    let val: u16 = val as u16;
+                    let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_add(1));
                 }
                 println!("{} bytes: inc {}", $n, stringify!($opr));
@@ -334,25 +353,46 @@ impl LR35902Cpu {
             }};
 
             (dec $opr:tt $n:expr) => {{
-                let val = load!($opr);
-                if std::mem::size_of_val(&val) == 1 {
-                    println!("decrementing u8 register");
-                    let val: u8 = val as u8;
-                    store!($opr, val.wrapping_sub(1));
+                let prev_val = load!($opr);
+                if std::mem::size_of_val(&prev_val) == 1 {
+                    println!("decrementing {} (u8) register", stringify!($opr));
+                    let val: u8 = prev_val.wrapping_sub(1) as u8;
+                    self.regs.f.z = (val == 0);
+                    self.regs.f.n = true;
+                    self.regs.f.h = ((prev_val as u8) ^ val) & 0x10 != 0;
+                    store!($opr, val);
                 } else {
-                    println!("decrementing u16 register");
-                    let val: u16 = val as u16;
+                    println!("decrementing {} u16 register", stringify!($opr));
+                    let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_sub(1));
                 } 
-                println!("{} bytes: inc {}", $n, stringify!($opr));
+                println!("{} bytes: dec {}", $n, stringify!($opr));
                 ($n as u8)
             }};
 
             (add $dst:tt $src:tt $n:expr) => {{
+                // TODO: add more code to detect different $dst, because this
+                // will affect setting of flags
                 let srcval = load!($src);
                 let dstval = load!($dst);
-                let resultval = dstval + srcval;
-                println!("add resultval: 0x{:x}, srcval: 0x{:x}, dstval: 0x{:x}", resultval, srcval, dstval);
+                let (resultval, overflowed) = dstval.overflowing_add(srcval);
+
+                self.regs.f.n = false;
+
+                if stringify!($dst) == "a" {
+                    self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
+                    self.regs.f.c = overflowed;
+                    self.regs.f.z = resultval == 0;
+                }  else if stringify!($dst) == "hl" {
+                    self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
+                    self.regs.f.c = overflowed;
+                    self.regs.f.z = resultval == 0;
+                } else if stringify!($dst) == "sp" {
+                    self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
+                    self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
+                    self.regs.f.z = false;
+                }
+                println!("add resultval: {:#x}, srcval: {:#x}, dstval: {:#x}", resultval, srcval, dstval);
                 store!($dst, resultval);
                 println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!($src));
                 ($n as u8)
@@ -571,7 +611,7 @@ impl LR35902Cpu {
             }};
 
             (rst $opr:literal $n:expr) => {{
-                let  rst_vector_num = $opr;
+                let  _rst_vector_num = $opr;
                 println!("{} bytes: rst {}", $n, stringify!($opr));
                 ($n as u8)
             }};
@@ -640,13 +680,13 @@ impl LR35902Cpu {
          */
         macro_rules! load {
             (n) => {{
-                self.load8(self.pc())
+                // assumes pc is a the next byte after opcode
+                self.fetch8()
             }};
 
             (nn) => {{
-                let lo = self.load8(self.pc().wrapping_add(1));
-                let hi = self.load8(self.pc().wrapping_add(2));
-                lo as u16 | ((hi as u16) << 8)
+                // assumes pc is at the next byte after opcode
+                self.fetch16()
             }};
 
             ((bc)) => {{
@@ -774,10 +814,36 @@ impl LR35902Cpu {
                 self.regs.sp = $val as u16; 
             }};
 
+            ((bc), $val:expr) => {{
+                let addr = self.regs.bc();
+                self.store8(addr, $val);
+            }};
+
+            ((nn), $val:expr) => {{
+                let addr = self.fetch16();
+                self.store8(addr, $val as u8);
+            }};
+
+            ((de), $val:expr) => {{
+                let addr = self.regs.de();
+                self.store8(addr, $val as u8);
+            }};
+
             ((hl), $val:expr) => {{
                 let addr = self.regs.hl();
-                let val = self.load8(addr);
-                self.store8(addr, val);
+                self.store8(addr, $val as u8);
+            }};
+
+            ((hl-), $val:expr) => {{
+                // TODO: do decrement part
+                let addr = self.regs.hl();
+                self.store8(addr, $val as u8);
+            }};
+
+            ((hl+), $val:expr) => {{
+
+                let addr = self.regs.hl();
+                self.store8(addr, $val as u8);
             }};
 
             (hl, $val:expr) => {{
@@ -785,25 +851,28 @@ impl LR35902Cpu {
             }};
         }
 
-        let pc = self.pc();
-        // add one to the pc, so that the instructions 
-        // that contains immediate data will load 
-        // from the correct bytes
-        self.set_pc(pc.wrapping_add(1));
         let oplen = use_z80_table!(gen_z80_exec_handlers);
-        // TODO: actually implement updating pc, 
-        // This is a horrible kludge, will not work because once we handle jumps and calls
-        // the pc will be set by those instructions, we dont want to automatically jump
-        // to the next instruction in sequence during execution, we can still use
-        // the following for disassembly though
-        if oplen > 1 {
-            self.set_pc(self.pc() + ((oplen - 1) as u16));
-        }
         oplen
     }
 
 }
 
+impl std::fmt::Debug for LR35902Cpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "REGS: PC: {:#x} A: {:#x} BC: {:#x} DE: {:#x} HL: {:#x} SP: {:#x} Flags: z:{}n:{}h:{}c:{}",
+               self.regs.pc,
+               self.regs.a,
+               self.regs.bc(),
+               self.regs.de(),
+               self.regs.hl(),
+               self.regs.sp,
+               if self.regs.f.z  { "1" } else { "0"},
+               if self.regs.f.n  { "1" } else { "0"},
+               if self.regs.f.h  { "1" } else { "0"},
+               if self.regs.f.c  { "1" } else { "0"},
+               )
+    }
+}
 
 
                 
@@ -816,7 +885,12 @@ fn test_disasm() {
                        0x03, // inc bc
                        0x24, // inc h
                        0x24, // inc h
-                       0x09]; // add hl, bc
+                       0x09, // add hl, bc
+                       0x01, // ld bc, nn (where nn = 0xbabe)
+                       0xbe,
+                       0xba,
+                       0x25, // dec h 
+    ]; 
     let bus = Shared::new(Bus::new(&code_buffer)); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
     /*
@@ -828,6 +902,8 @@ fn test_disasm() {
     */
     while cpu.pc() < (code_buffer.len() as u16) {
         cpu.exec_one_instruction() as usize;
+        println!("CPU:");
+        println!("{:?}", cpu);
     }
 }
 
