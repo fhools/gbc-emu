@@ -201,6 +201,11 @@ pub struct Flags {
     pub c: bool,
 }
 
+#[derive(Default, Debug)]
+pub struct CpuStatistics {
+    pub num_instrs_executed: i32,
+}
+
 /*
  * The LR35902 is a Z80 compatible CPU made by Sharp
  * In the Gameboy Color it runs at 8.2 Mhz
@@ -209,6 +214,7 @@ pub struct Flags {
 pub struct LR35902Cpu {
     bus: Shared<Bus>,
     regs: Registers,
+    stats: CpuStatistics,
 }
 
 impl LR35902Cpu {
@@ -216,7 +222,8 @@ impl LR35902Cpu {
     fn new(start_pc: u16, bus: Shared<Bus>) -> Self {
         let mut cpu = LR35902Cpu {
             bus,
-            regs: Default::default()
+            regs: Default::default(),
+            stats: Default::default()
         };
         cpu.regs.pc = start_pc;
         cpu
@@ -330,7 +337,7 @@ impl LR35902Cpu {
             (ld $dst:tt $src:tt $n:expr) => {{
                 let srcval = load!($src);
                 store!($dst, srcval);
-                println!("{} bytes: ld {} = {:#x}", $n, stringify!($dst), srcval);
+                println!("{} bytes: ld {} = {:#X}", $n, stringify!($dst), srcval);
                 ($n as u8)
             }};
 
@@ -398,7 +405,7 @@ impl LR35902Cpu {
                     self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x100 != 0;
                     self.regs.f.z = false;
                 }
-                println!("add resultval: {:#x}, srcval: {:#x}, dstval: {:#x}", resultval, srcval, dstval);
+                println!("add resultval: {:#X}, srcval: {:#X}, dstval: {:#X}", resultval, srcval, dstval);
                 store!($dst, resultval);
                 println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!($src));
                 ($n as u8)
@@ -890,14 +897,19 @@ impl LR35902Cpu {
         }
 
         let oplen = use_z80_table!(gen_z80_exec_handlers);
+        self.stats.num_instrs_executed += 1;
         oplen
+    }
+
+    pub fn instructions_executed(&self) -> i32 {
+        self.stats.num_instrs_executed
     }
 
 }
 
 impl std::fmt::Debug for LR35902Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "REGS: PC: {:#x} A: {:#x} BC: {:#x} DE: {:#x} HL: {:#x} SP: {:#x} Flags: z:{} n:{} h:{} c:{}",
+        write!(f, "REGS: PC: {:#06X} A: {:#06X} BC: {:#06X} DE: {:#06X} HL: {:#06X} SP: {:#06X} Flags: z:{} n:{} h:{} c:{}",
                self.regs.pc,
                self.regs.a,
                self.regs.bc(),
@@ -927,7 +939,10 @@ fn test_disasm() {
                        0x01, // ld bc, nn (where nn = 0xbabe)
                        0xbe, // z80 is little endien so 0xbabe is 0xbe 0xba
                        0xba,
-                       0x25, // dec h 
+                       0x25,
+                       0xC3, // jp 0x0000 ; go back to beginning
+                       0x00,
+                       0x00
     ]; 
     let bus = Shared::new(Bus::new(&code_buffer)); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
@@ -940,8 +955,9 @@ fn test_disasm() {
     }
   
     // Execute instructions (may hop around due to jumps/calls)
+    let MAX_INSTRUCTIONS_TO_RUN = 20;
     cpu.set_pc(0); 
-    while cpu.pc() < (code_buffer.len() as u16) {
+    while cpu.pc() < (code_buffer.len() as u16) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN{
         cpu.exec_one_instruction() as usize;
         println!("CPU:");
         println!("{:?}", cpu);
