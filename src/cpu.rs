@@ -379,17 +379,23 @@ impl LR35902Cpu {
 
                 self.regs.f.n = false;
 
+                // from stackoverflow:
+                // overflow is when you add 2 numbers with the same sign but get a different sign
                 if stringify!($dst) == "a" {
+                    //bit 4
                     self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
                 }  else if stringify!($dst) == "hl" {
+                    // bit 12
                     self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
                 } else if stringify!($dst) == "sp" {
+                    // bit 4
                     self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
-                    self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
+                    // bit 8
+                    self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x100 != 0;
                     self.regs.f.z = false;
                 }
                 println!("add resultval: {:#x}, srcval: {:#x}, dstval: {:#x}", resultval, srcval, dstval);
@@ -405,6 +411,18 @@ impl LR35902Cpu {
             }};
 
             (jr $op1:tt $op2:tt $n:expr) => {{
+                let addr_offset = load!($op2);
+                let condflags = stringify!($op1); 
+                let condmet = match condflags {
+                    "nz" => { self.regs.f.n || self.regs.f.z },
+                    "z" => { self.regs.f.z },
+                    "nc" => { self.regs.f.n || self.regs.f.c },
+                    "c" =>  { self.regs.f.c },
+                    _ => { panic!("jr condflags unknown {}", condflags);}
+                };
+                if condmet {
+                    self.set_pc(self.regs.pc.wrapping_add(addr_offset as u16));
+                }
                 println!("{} bytes: jr {}, {}", $n, stringify!($op1), stringify!($op2));
                 ($n as u8)
             }};
@@ -538,6 +556,7 @@ impl LR35902Cpu {
                 let dstval = load!($dst);
                 let srcval = load!($src);
                 let result = dstval + srcval + (self.regs.f.c as u8);
+                // TODO: set carry/h flags
                 store!($dst, result);
                 println!("{} bytes: adc {}, {}", $n, stringify!($dst), stringify!($src));
                 ($n as u8)
@@ -624,13 +643,17 @@ impl LR35902Cpu {
              
              (jp nn $n:expr) => {{ 
                 let addr = load!(nn);
+                self.set_pc(addr);
                 println!("{} bytes: jp {:x}", $n, addr);
                 ($n as u8)
              }};
 
              (jp nz nn $n:expr) => {{ 
                  let addr = load!(nn);
-                println!("{} bytes: jp nz {:x}", $n, addr);
+                 if self.regs.f.n || self.regs.f.z   {
+                     self.set_pc(addr);
+                 }
+                 println!("{} bytes: jp nz {:x}", $n, addr);
                 ($n as u8)
              }};
 
@@ -835,14 +858,14 @@ impl LR35902Cpu {
             }};
 
             ((hl-), $val:expr) => {{
-                // TODO: do decrement part
                 let addr = self.regs.hl();
+                self.regs.set_hl(self.regs.hl().wrapping_sub(1));
                 self.store8(addr, $val as u8);
             }};
 
             ((hl+), $val:expr) => {{
-
                 let addr = self.regs.hl();
+                self.regs.set_hl(self.regs.hl().wrapping_add(1));
                 self.store8(addr, $val as u8);
             }};
 
@@ -859,7 +882,7 @@ impl LR35902Cpu {
 
 impl std::fmt::Debug for LR35902Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "REGS: PC: {:#x} A: {:#x} BC: {:#x} DE: {:#x} HL: {:#x} SP: {:#x} Flags: z:{}n:{}h:{}c:{}",
+        write!(f, "REGS: PC: {:#x} A: {:#x} BC: {:#x} DE: {:#x} HL: {:#x} SP: {:#x} Flags: z:{} n:{} h:{} c:{}",
                self.regs.pc,
                self.regs.a,
                self.regs.bc(),
@@ -887,19 +910,22 @@ fn test_disasm() {
                        0x24, // inc h
                        0x09, // add hl, bc
                        0x01, // ld bc, nn (where nn = 0xbabe)
-                       0xbe,
+                       0xbe, // z80 is little endien so 0xbabe is 0xbe 0xba
                        0xba,
                        0x25, // dec h 
     ]; 
     let bus = Shared::new(Bus::new(&code_buffer)); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
-    /*
+   
+    // Disassemble simple view
     while cpu.pc() < (code_buffer.len() as u16) {
-        let opcode = cpu.read8(cpu.pc()); 
+        let opcode = cpu.load8(cpu.pc()); 
         let oplen = cpu.disasm(opcode) as usize;
         cpu.set_pc(cpu.pc() + (oplen as u16));
     }
-    */
+  
+    // Execute instructions (may hop around due to jumps/calls)
+    cpu.set_pc(0); 
     while cpu.pc() < (code_buffer.len() as u16) {
         cpu.exec_one_instruction() as usize;
         println!("CPU:");
