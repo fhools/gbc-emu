@@ -414,9 +414,9 @@ impl LR35902Cpu {
                 let addr_offset = load!($op2);
                 let condflags = stringify!($op1); 
                 let condmet = match condflags {
-                    "nz" => { self.regs.f.n || self.regs.f.z },
+                    "nz" => { !self.regs.f.z },
                     "z" => { self.regs.f.z },
-                    "nc" => { self.regs.f.n || self.regs.f.c },
+                    "nc" => { !self.regs.f.c },
                     "c" =>  { self.regs.f.c },
                     _ => { panic!("jr condflags unknown {}", condflags);}
                 };
@@ -607,6 +607,14 @@ impl LR35902Cpu {
             }};
 
             (ret nz $n:expr) => {{
+                if !self.regs.f.z {
+                    let  hi = self.load8(self.regs.sp) as u16;
+                    self.regs.sp += 1;
+                    let lo = self.load8(self.regs.sp) as u16;
+                    self.regs.sp += 1;
+                    let ret_addr = (hi << 8) | lo;
+                    self.set_pc(ret_addr);
+                }
                 println!("{} bytes: ret nz", $n);
                 ($n as u8)
             }};
@@ -637,6 +645,13 @@ impl LR35902Cpu {
             
              (call nz nn $n:expr) => {{
                 let addr = load!(nn);
+                if !self.regs.f.z {
+                    self.regs.sp -= 1;
+                    self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
+                    self.regs.sp -= 1;
+                    self.store8(self.regs.sp, (self.regs.pc &0xFF) as u8);
+                    self.set_pc(addr);
+                }
                 println!("{} bytes: call nz {:x}", $n, addr);
                 ($n as u8)
              }};
@@ -650,7 +665,7 @@ impl LR35902Cpu {
 
              (jp nz nn $n:expr) => {{ 
                  let addr = load!(nn);
-                 if self.regs.f.n || self.regs.f.z   {
+                 if !self.regs.f.z   {
                      self.set_pc(addr);
                  }
                  println!("{} bytes: jp nz {:x}", $n, addr);
