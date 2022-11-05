@@ -62,11 +62,11 @@ macro_rules! use_z80_table {
          /* C0 */ ret nz :1;       pop bc :1;      jp nz, nn :3;   jp nn :3;      call nz, nn :3;   push bc :1;     add a, n :2;    rst 0 :1;
          /* C8 */ ret z :1;        ret :1;         jp z, nn :3;    cb :1;         call z, nn :3;    call nn :3;     adc a, n :2;    rst 1 :1;
          /* D0 */ ret nc :1;       pop de :1;      jp nc, nn :3;   TODO :1;       call nc, nn :3;   push de :1;     sub :1;         rst 2 :1;
-         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
-         /* E0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
-         /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
-         /* F0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
-         /* F8 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* D8 */ ret c :1;        reti :1;        jp c, nn :3;    TODO :1;       call c, nn :3;    TODO :1;        sbc a, n :1;    rst 3 :1;
+         /* E0 */ ld (n), a :2;    pop hl :1;      ld (c), a :1;   TODO :1;       TODO :1;          push hl :1;     and n :2;       rst 4 :1;
+         /* E8 */ add sp, n :2;    jp hl :1;       ld (nn), a :3;  TODO :1;       TODO :1;          TODO :1;        xor n :2;       rst 5 :1;
+         /* F0 */ ld a, (n) :2;    pop af :1;      ld a, (c) :1;   di :1;         TODO :1;          push af :1;     or n :1;        rst 6 :1;
+         /* F8 */ ld hl, spn :2;   ld sp, hl :1;   ld a, (nn) :3;  ei :1;         TODO :1;          TODO :1;        cp n :2;        rst 7 :1;
             
     )
     }
@@ -329,8 +329,48 @@ impl LR35902Cpu {
         }
 
         macro_rules! gen_exec_mne {
-            (nop $n:expr) => { {
+            (nop $n:expr) => {{
                 println!("{} bytes: {}", $n, "nop");
+                ($n as u8)
+            }};
+
+            (ld (n)  a $n:expr) => {{
+                let lo = load!(n) as u16;
+                let srcval = load!(a);
+                let addr = 0xFF00 + lo;
+                self.store8(addr, srcval);
+                ($n as u8)
+            }};
+
+            (ld a  (n) $n:expr) => {{
+                let lo = load!(n) as u16;
+                let addr = 0xFF00 + lo;
+                let val = self.load8(addr);
+                store!(a, val);
+                ($n as u8)
+            }};
+
+            (ld (c)  a $n:expr) => {{
+                let lo = load!(c) as u16;
+                let srcval = load!(a);
+                let addr = 0xFF00 + lo;
+                self.store8(addr, srcval);
+                ($n as u8)
+            }};
+
+            (ld a (c) $n:expr) => {{
+                let lo = load!(c) as u16;
+                let addr = 0xFF00 + lo;
+                let val = self.load8(addr);
+                store!(a, val);
+                ($n as u8)
+            }};
+
+            (ld hl spn $n:expr) => {{
+                let lo = load!(n) as u16;
+                let spval = load!(sp) as u16;
+                let val = spval.wrapping_add(lo); 
+                store!(hl, val);
                 ($n as u8)
             }};
 
@@ -381,8 +421,8 @@ impl LR35902Cpu {
                 // TODO: add more code to detect different $dst, because this
                 // will affect setting of flags
                 let srcval = load!($src);
-                let dstval = load!($dst);
-                let (resultval, overflowed) = dstval.overflowing_add(srcval);
+                let dstval = load!($dst) as u16;
+                let (resultval, overflowed) = dstval.overflowing_add(srcval as u16);
 
                 self.regs.f.n = false;
 
@@ -390,7 +430,7 @@ impl LR35902Cpu {
                 // overflow is when you add 2 numbers with the same sign but get a different sign
                 if stringify!($dst) == "a" {
                     //bit 4
-                    self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
+                    self.regs.f.h = ((dstval as u8) ^ (srcval as u8) ^ (resultval as u8)) & 0x10 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
                 }  else if stringify!($dst) == "hl" {
@@ -400,7 +440,7 @@ impl LR35902Cpu {
                     self.regs.f.z = resultval == 0;
                 } else if stringify!($dst) == "sp" {
                     // bit 4
-                    self.regs.f.h = (dstval ^ srcval ^ resultval) & 0x10 != 0;
+                    self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x10 != 0;
                     // bit 8
                     self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x100 != 0;
                     self.regs.f.z = false;
@@ -620,6 +660,18 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
+            (reti $n:expr) => {{
+                // TODO: how is RETI different than RET??
+                let  hi = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let lo = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let ret_addr = (hi << 8) | lo;
+                self.set_pc(ret_addr);
+                println!("{} bytes: ret", $n);
+                ($n as u8)
+            }};
+
             (ret $n:expr) => {{
                 let  hi = self.load8(self.regs.sp) as u16;
                 self.regs.sp += 1;
@@ -636,6 +688,8 @@ impl LR35902Cpu {
                 let cond_met = match condflags {
                     "nz" => { !self.regs.f.z },
                     "z" => { self.regs.f.z },
+                    "nc" => { !self.regs.f.c },
+                    "c" => { self.regs.f.c },
                     _ => { panic!("ret cond: {} unknown", condflags); }
                 };
                 if cond_met {
@@ -666,6 +720,23 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
+            (pop hl $n:expr) => {{
+                let hi = self.load8(self.regs.sp);
+                let lo = self.load8(self.regs.sp + 1);
+                self.regs.set_hl( ((hi as u16) << 8) | lo as u16);
+                self.regs.sp += 2;
+                ($n as u8)
+            }};
+
+            (pop af $n:expr) => {{
+                let hi = self.load8(self.regs.sp);
+                let lo = self.load8(self.regs.sp + 1);
+                self.regs.set_af( ((hi as u16) << 8) | lo as u16);
+                self.regs.sp += 2;
+                ($n as u8)
+            }};
+
+            // TODO: refactor all the push into one call of push and matches for which 16-bit dest
             (push bc $n:expr) => {{
                 let hi: u8 = (self.regs.bc() >> 8) as u8;
                 let lo: u8 = (self.regs.bc() & 0xFF) as u8;
@@ -679,6 +750,26 @@ impl LR35902Cpu {
             (push de $n:expr) => {{
                 let hi: u8 = (self.regs.de() >> 8) as u8;
                 let lo: u8 = (self.regs.de() & 0xFF) as u8;
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, hi);
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, lo);
+                ($n as u8)
+            }};
+
+            (push hl $n:expr) => {{
+                let hi: u8 = (self.regs.hl() >> 8) as u8;
+                let lo: u8 = (self.regs.hl() & 0xFF) as u8;
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, hi);
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, lo);
+                ($n as u8)
+            }};
+
+            (push af $n:expr) => {{
+                let hi: u8 = (self.regs.af() >> 8) as u8;
+                let lo: u8 = (self.regs.af() & 0xFF) as u8;
                 self.regs.sp -= 1;
                 self.store8(self.regs.sp, hi);
                 self.regs.sp -= 1;
@@ -735,15 +826,35 @@ impl LR35902Cpu {
                  let cond_met = match condflags {
                      "nz" => { !self.regs.f.z },
                      "z" => { self.regs.f.z },
+                     "nc" => { !self.regs.f.c },
+                     "c" => { self.regs.f.c},
                      _ => { panic!("cp cond: {} unknown", condflags); }
                  };
                  if cond_met {
                      self.set_pc(addr);
                  }
-                 println!("{} bytes: jp nz {:x}", $n, addr);
+                 println!("{} bytes: jp {} {:x}", $n, condflags, addr);
                 ($n as u8)
              }};
 
+             (jp hl $n:expr) => {{
+                 let addr = self.regs.hl();
+                 self.set_pc(addr);
+                 println!("{} bytes: jp hl {:x}", $n, addr);
+                 ($n as u8)
+             }};
+
+             (di $n:expr) => {{
+                // TODO: reset IME flag, prohibit maskable interrupts
+                 println!("{} bytes: di", $n);
+                 ($n as u8)
+             }}; 
+             
+             (ei $n:expr) => {{
+                // TODO: set IME flag, enable maskable interrupts
+                 println!("{} bytes: ei", $n);
+                 ($n as u8)
+             }}; 
 
             (TODO $n:expr) => {{
                 todo!("unknown opcode:{:x}", opc);
@@ -797,6 +908,11 @@ impl LR35902Cpu {
             (nn) => {{
                 // assumes pc is at the next byte after opcode
                 self.fetch16()
+            }};
+
+            ((nn)) => {{
+                let addr = self.fetch16();
+                self.load8(addr)
             }};
 
             ((bc)) => {{
