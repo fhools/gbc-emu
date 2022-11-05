@@ -60,8 +60,8 @@ macro_rules! use_z80_table {
          /* B0 */ or b :1;         or c :1;        or d :1;        or e :1;       or h :1;          or l :1;        or (hl) :1;     or a :1;
          /* B8 */ cp b :1;         cp c :1;        cp d :1;        cp e :1;       cp h  :1;         cp l :1;        cp (hl) :1;     cp a :1;
          /* C0 */ ret nz :1;       pop bc :1;      jp nz, nn :3;   jp nn :3;      call nz, nn :3;   push bc :1;     add a, n :2;    rst 0 :1;
-         /* C8 */ TODO :1; TODO :1; TODO :1; cb :1; TODO :1; TODO :1; TODO :1; TODO :1;
-         /* D0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
+         /* C8 */ ret z :1;        ret :1;         jp z, nn :3;    cb :1;         call z, nn :3;    call nn :3;     adc a, n :2;    rst 1 :1;
+         /* D0 */ ret nc :1;       pop de :1;      jp nc, nn :3;   TODO :1;       call nc, nn :3;   push de :1;     sub :1;         rst 2 :1;
          /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
          /* E0 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
          /* 40 */ TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1; TODO :1;
@@ -576,6 +576,13 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
+            (sub $n:expr) => {{
+                let oprval = load!(n);
+                self.regs.a = self.regs.a - oprval;
+                println!("{} bytes: sub {:#04X}", $n, oprval);
+                ($n as u8)
+            }};
+
             (sbc $dst:tt $src:tt $n:expr) => {{
                 let dstval = load!($dst);
                 let srcval = load!($src);
@@ -613,8 +620,25 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
-            (ret nz $n:expr) => {{
-                if !self.regs.f.z {
+            (ret $n:expr) => {{
+                let  hi = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let lo = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let ret_addr = (hi << 8) | lo;
+                self.set_pc(ret_addr);
+                println!("{} bytes: ret", $n);
+                ($n as u8)
+            }};
+            
+            (ret $conds:ident $n:expr) => {{
+                let condflags = stringify!($conds);
+                let cond_met = match condflags {
+                    "nz" => { !self.regs.f.z },
+                    "z" => { self.regs.f.z },
+                    _ => { panic!("ret cond: {} unknown", condflags); }
+                };
+                if cond_met {
                     let  hi = self.load8(self.regs.sp) as u16;
                     self.regs.sp += 1;
                     let lo = self.load8(self.regs.sp) as u16;
@@ -622,7 +646,7 @@ impl LR35902Cpu {
                     let ret_addr = (hi << 8) | lo;
                     self.set_pc(ret_addr);
                 }
-                println!("{} bytes: ret nz", $n);
+                println!("{} bytes: ret {}", $n, condflags);
                 ($n as u8)
             }};
            
@@ -630,6 +654,14 @@ impl LR35902Cpu {
                 let hi = self.load8(self.regs.sp);
                 let lo = self.load8(self.regs.sp + 1);
                 self.regs.set_bc( ((hi as u16) << 8) | lo as u16);
+                self.regs.sp += 2;
+                ($n as u8)
+            }};
+
+            (pop de $n:expr) => {{
+                let hi = self.load8(self.regs.sp);
+                let lo = self.load8(self.regs.sp + 1);
+                self.regs.set_de( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
                 ($n as u8)
             }};
@@ -644,15 +676,31 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
+            (push de $n:expr) => {{
+                let hi: u8 = (self.regs.de() >> 8) as u8;
+                let lo: u8 = (self.regs.de() & 0xFF) as u8;
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, hi);
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, lo);
+                ($n as u8)
+            }};
+
             (rst $opr:literal $n:expr) => {{
                 let  _rst_vector_num = $opr;
                 println!("{} bytes: rst {}", $n, stringify!($opr));
                 ($n as u8)
             }};
             
-             (call nz nn $n:expr) => {{
+            (call $conds:ident nn $n:expr) => {{
                 let addr = load!(nn);
-                if !self.regs.f.z {
+                let condflags = stringify!($conds);
+                let cond_met = match condflags {
+                    "nz" => { !self.regs.f.z },
+                    "z" => { self.regs.f.z },
+                    _ => { panic!("call cond flag: {} is unknown!", condflags); }
+                };
+                if cond_met {
                     self.regs.sp -= 1;
                     self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                     self.regs.sp -= 1;
@@ -661,7 +709,18 @@ impl LR35902Cpu {
                 }
                 println!("{} bytes: call nz {:x}", $n, addr);
                 ($n as u8)
-             }};
+            }};
+            
+            (call nn $n:expr) => {{
+                let addr = load!(nn);
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
+                self.regs.sp -= 1;
+                self.store8(self.regs.sp, (self.regs.pc &0xFF) as u8);
+                self.set_pc(addr);
+                println!("{} bytes: call nz {:x}", $n, addr);
+                ($n as u8)
+            }};
              
              (jp nn $n:expr) => {{ 
                 let addr = load!(nn);
@@ -670,9 +729,15 @@ impl LR35902Cpu {
                 ($n as u8)
              }};
 
-             (jp nz nn $n:expr) => {{ 
+             (jp $cond:ident nn $n:expr) => {{ 
                  let addr = load!(nn);
-                 if !self.regs.f.z   {
+                 let condflags = stringify!($cond);
+                 let cond_met = match condflags {
+                     "nz" => { !self.regs.f.z },
+                     "z" => { self.regs.f.z },
+                     _ => { panic!("cp cond: {} unknown", condflags); }
+                 };
+                 if cond_met {
                      self.set_pc(addr);
                  }
                  println!("{} bytes: jp nz {:x}", $n, addr);
@@ -947,7 +1012,7 @@ fn test_disasm() {
     let bus = Shared::new(Bus::new(&code_buffer)); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
    
-    // Disassemble simple view
+    // Disassemble.  simple view, does not show operand values
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.load8(cpu.pc()); 
         let oplen = cpu.disasm(opcode) as usize;
@@ -955,12 +1020,13 @@ fn test_disasm() {
     }
   
     // Execute instructions (may hop around due to jumps/calls)
-    let MAX_INSTRUCTIONS_TO_RUN = 20;
+    const MAX_INSTRUCTIONS_TO_RUN : i32 = 20;
     cpu.set_pc(0); 
-    while cpu.pc() < (code_buffer.len() as u16) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN{
+    while cpu.pc() < (code_buffer.len() as u16) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
         cpu.exec_one_instruction() as usize;
         println!("CPU:");
         println!("{:?}", cpu);
     }
+
 }
 
