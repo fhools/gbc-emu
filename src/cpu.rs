@@ -38,10 +38,10 @@ macro_rules! use_z80_table {
          /* 00 */ nop :1;          ld bc, nn :3;   ld (bc), a :1;  inc bc :1;     inc b :1;         dec b :1;       ld b, n :2;     rlca :1;
          /* 08 */ ld (nn), sp :3;  add hl, bc :1;  ld a, (bc) :1;  dec bc :1;     inc c :1;         dec c :1;       ld c, n :2;     rrca :1;
          /* 10 */ stop :2;         ld de, nn :3;   ld (de), a :1;  inc de :1;     inc d :1;         dec d :1;       ld d, n :2;     rla :1; 
-         /* 18 */ jr n :2;         add hl, de :1;  ld a, (de) :1;  dec de :1;     inc e :1;         dec e :1;       ld e, n :2;     rra :1;
-         /* 20 */ jr nz, n :2;     ld hl, nn :3;   ld (hl+), a :1; inc hl :1;     inc h :1;         dec h :1;       ld h, n :2;     daa :1;
-         /* 28 */ jr z, n :2;      add hl, hl :1;  ld a, (hl+) :1; dec hl :1;     inc l :1;         dec l :1;       ld l, n :2;     cpl :1;
-         /* 30 */ jr nc, n :2;     ld sp, nn :3;   ld (hl-), a :1; inc sp :1;     inc (hl) :1;      dec (hl) :1;    ld (hl), n :2;  scf :1;
+         /* 18 */ jr s8 :2;         add hl, de :1;  ld a, (de) :1;  dec de :1;     inc e :1;         dec e :1;       ld e, n :2;     rra :1;
+         /* 20 */ jr nz, s8 :2;     ld hl, nn :3;   ld (hl+), a :1; inc hl :1;     inc h :1;         dec h :1;       ld h, n :2;     daa :1;
+         /* 28 */ jr z, s8 :2;      add hl, hl :1;  ld a, (hl+) :1; dec hl :1;     inc l :1;         dec l :1;       ld l, n :2;     cpl :1;
+         /* 30 */ jr nc, s8 :2;     ld sp, nn :3;   ld (hl-), a :1; inc sp :1;     inc (hl) :1;      dec (hl) :1;    ld (hl), n :2;  scf :1;
          /* 38 */ jr c, n :2;      add hl, sp :1;  ld a, (hl-) :1; dec sp :1;     inc a :1;         dec a :1;       ld a, n :2;     ccf :1;
          /* 40 */ ld b, b :1;      ld b, c :1;     ld b, d :1;     ld b, e :1;    ld b, h :1;       ld b, l :1;     ld b, (hl) :1;  ld b, a :1;
          /* 48 */ ld c, b :1;      ld c, c :1;     ld c, d :1;     ld c, e :1;    ld c, h :1;       ld c, l :1;     ld c, (hl) :1;  ld c, a :1;
@@ -374,7 +374,7 @@ impl LR35902Cpu {
             }};
 
             (ld hl spn $n:expr) => {{
-                let lo = load!(n) as u16;
+                let lo = load!(n) as i8 as i16 as u16;
                 let spval = load!(sp) as u16;
                 let val = spval.wrapping_add(lo); 
                 store!(hl, val);
@@ -425,8 +425,6 @@ impl LR35902Cpu {
             }};
 
             (add $dst:tt $src:tt $n:expr) => {{
-                // TODO: add more code to detect different $dst, because this
-                // will affect setting of flags
                 let srcval = load!($src);
                 let dstval = load!($dst) as u16;
                 let (resultval, overflowed) = dstval.overflowing_add(srcval as u16);
@@ -459,10 +457,10 @@ impl LR35902Cpu {
             }};
 
 
-            (jr n $n:expr) => {{
+            (jr s8 $n:expr) => {{
                 // n is signed 8 byte offset
-                let addr_offset = load!(n) as i8 as i16 as u16;
-                let addr = self.regs.pc.wrapping_add(addr_offset);
+                let addr_offset = load!(s8);
+                let addr = self.regs.pc.wrapping_add(addr_offset as u16);
                 self.set_pc(addr);
                 ($n as u8)
             }};
@@ -931,6 +929,11 @@ impl LR35902Cpu {
                 self.fetch8()
             }};
 
+            (s8) => {{
+                // assumes pc is a the next byte after opcode
+                self.fetch8() as i8
+            }};
+
             (nn) => {{
                 // assumes pc is at the next byte after opcode
                 self.fetch16()
@@ -1177,5 +1180,13 @@ fn test_disasm() {
         println!("{:?}", cpu);
     }
 
+}
+
+#[test]
+fn test_signext() {
+    // Just testing that sign extension can work for i8 to u16
+    let i: i8 = -1;
+    let u: u16 = i as u16;
+    println!("u: {:#06X}", u);
 }
 
