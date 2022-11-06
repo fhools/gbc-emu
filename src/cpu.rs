@@ -737,45 +737,14 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
-            // TODO: refactor all the push into one call of push and matches for which 16-bit dest
-            (push bc $n:expr) => {{
-                let hi: u8 = (self.regs.bc() >> 8) as u8;
-                let lo: u8 = (self.regs.bc() & 0xFF) as u8;
+            (push $reg:tt $n:expr) => {{
+                let regval = load!($reg);
                 self.regs.sp -= 1;
-                self.store8(self.regs.sp, hi);
+                self.store8(self.regs.sp, (regval >> 8) as u8);
                 self.regs.sp -= 1;
-                self.store8(self.regs.sp, lo);
+                self.store8(self.regs.sp, (regval & 0xFF) as u8);
                 ($n as u8)
-            }};
 
-            (push de $n:expr) => {{
-                let hi: u8 = (self.regs.de() >> 8) as u8;
-                let lo: u8 = (self.regs.de() & 0xFF) as u8;
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, hi);
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, lo);
-                ($n as u8)
-            }};
-
-            (push hl $n:expr) => {{
-                let hi: u8 = (self.regs.hl() >> 8) as u8;
-                let lo: u8 = (self.regs.hl() & 0xFF) as u8;
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, hi);
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, lo);
-                ($n as u8)
-            }};
-
-            (push af $n:expr) => {{
-                let hi: u8 = (self.regs.af() >> 8) as u8;
-                let lo: u8 = (self.regs.af() & 0xFF) as u8;
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, hi);
-                self.regs.sp -= 1;
-                self.store8(self.regs.sp, lo);
-                ($n as u8)
             }};
 
             (rst $opr:literal $n:expr) => {{
@@ -881,6 +850,12 @@ impl LR35902Cpu {
 
         macro_rules! gen_exec_cb_mne {
             (rlc $oper:tt $n:expr) => {{
+                let mut val = load!($oper) as u8;
+                let bit7 = val >> 7; 
+                val = val << 1;
+                val = bit7 | val;
+                store!($oper, val);
+                self.regs.c = bit7;
                 println!("{} bytes: rlc {}", stringify!($n), stringify!($oper));
                 ($n as u8)
             }}
@@ -990,6 +965,10 @@ impl LR35902Cpu {
 
             (hl) => {
                 self.regs.hl()
+            };
+
+            (af) => {
+                self.regs.af()
             };
 
             (sp) => {
