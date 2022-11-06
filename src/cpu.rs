@@ -79,6 +79,8 @@ macro_rules! use_z80_cb_table {
          /*       00/08            01/09           02/0A           03/0B          04/0C           05/0D           06/0E           07/0F          */ 
          /* 00 */ rlc b :1;        rlc c :1;       rlc d :1;       rlc e :1;      rlc h :1;       rlc l :1;       rlc (hl) :1;    rlc a :1;
          /* 08 */ rrc b :1;        rrc c :1;       rrc d :1;       rrc e :1;      rrc h :1;       rrc l :1;       rrc (hl) :1;    rrc a :1;  
+         /* 10 */ rl b :1;         rl c :1;        rl d :1;        rl e :1;       rl h :1;        rl l :1;        rl (hl) :1;     rl a :1;
+         /* 18 */ rr b :1;         rr c :1;        rr d :1;        rr e :1;       rr h :1;        rr l :1;        rr (hl) :1;     rr a :1;  
     )
     }
 }
@@ -487,31 +489,28 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
-            // rotate right, bit 0 into carry, carry into bit 7
+            // rotate right,  carry into bit 7
             (rra $n:expr)  => {{
                 let mut aval= load!(a) as u8;
                 let bit0 = aval & 0x01;
                 aval = aval >> 1;
                 aval = ((self.regs.f.c as u8) << 7) | aval;
                 store!(a, aval);
-                self.regs.f.c = bit0 == 0x1;
                 println!("{} bytes: rra", $n);
                 ($n as u8)
             }};
 
-            // rotate left, into carry, from carry to bit 0 of a
+            // rotate left, carry into bit0
             (rla $n:expr)  => {{
                 let mut aval = load!(a) as u8;
-                let bit7 = aval >> 7; 
                 aval = aval << 1;
                 aval = (self.regs.f.c as u8) | aval;
                 store!(a, aval);
-                self.regs.c = bit7;
                 println!("{} bytes: rla", $n);
                 ($n as u8)
             }};
 
-            // rotate left register a, bit 7 into carry and into bit 0
+            // rotate left register a, bit7 into carry and bit0
             (rlca $n:expr)  => {{
                 let mut aval = load!(a) as u8;
                 let bit7 = aval >> 7; 
@@ -522,7 +521,7 @@ impl LR35902Cpu {
                 println!("{} bytes: rlca", $n);
                 ($n as u8)
             }};
-            // rotate right register a, bit 0 into carry and into bit 7
+            // rotate right , bit 0 into carry and into bit7
             (rrca $n:expr)  => {{
                 let mut aval = load!(a) as u8;
                 let bit0 = aval & 0x01; 
@@ -865,6 +864,7 @@ impl LR35902Cpu {
 
         macro_rules! gen_exec_cb_mne {
 
+            // rotate left, bit7 into bit0 and carry
             (rlc $oper:tt $n:expr) => {{
                 let mut val = load!($oper) as u8;
                 let bit7 = val >> 7; 
@@ -876,14 +876,35 @@ impl LR35902Cpu {
                 ($n as u8)
             }};
 
+            // rotate right, bit0 into bit7 and carry
             (rrc $oper:tt $n:expr) => {{
-                let mut aval = load!($oper) as u8;
-                let bit0 = aval & 0x01; 
-                aval = aval >> 1;
-                aval = (bit0 << 7) | aval;
-                store!($oper, aval);
+                let mut val = load!($oper) as u8;
+                let bit0 = val & 0x01; 
+                val = val >> 1;
+                val = (bit0 << 7) | val;
+                store!($oper, val);
                 self.regs.c = bit0;
                 println!("{} bytes: rrc {}", stringify!($n), stringify!($oper));
+                ($n as u8)
+            }};
+
+            // rotate left, carry into bit0
+            (rl $oper:tt $n:expr) => {{
+                let mut val = load!($oper) as u8;
+                val = val << 1;
+                val = (self.regs.f.c as u8) | val;
+                store!($oper, val);
+                println!("{} bytes: rl", $n);
+                ($n as u8)
+            }};
+
+            // rotate right, carry into bit7
+            (rr $oper:tt $n:expr) => {{
+                let mut val= load!($oper) as u8;
+                val = val >> 1;
+                val = ((self.regs.f.c as u8) << 7) | val;
+                store!($oper, val);
+                println!("{} bytes: rra", $n);
                 ($n as u8)
             }};
         }
