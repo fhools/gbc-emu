@@ -216,6 +216,9 @@ pub struct CpuStatistics {
 pub struct LR35902Cpu {
     bus: Shared<Bus>,
     regs: Registers,
+    prev_ime: bool, // since EI instruction effect is delayed, we use prev_ime to actually test 
+                    // if interrupt processing should occur
+    ime: bool,     // interrupt enable flag
     stats: CpuStatistics,
 }
 
@@ -225,6 +228,8 @@ impl LR35902Cpu {
         let mut cpu = LR35902Cpu {
             bus,
             regs: Default::default(),
+            prev_ime: true,
+            ime: true,
             stats: Default::default()
         };
         cpu.regs.pc = start_pc;
@@ -455,12 +460,15 @@ impl LR35902Cpu {
 
 
             (jr n $n:expr) => {{
-                println!("{} bytes: jr n", $n);
+                // n is signed 8 byte offset
+                let addr_offset = load!(n) as i8 as i16 as u16;
+                let addr = self.regs.pc.wrapping_add(addr_offset);
+                self.set_pc(addr);
                 ($n as u8)
             }};
 
             (jr $op1:tt $op2:tt $n:expr) => {{
-                let addr_offset = load!($op2);
+                let addr_offset = load!($op2) as i8 as i16 as u16;
                 let condflags = stringify!($op1); 
                 let condmet = match condflags {
                     "nz" => { !self.regs.f.z },
@@ -470,7 +478,7 @@ impl LR35902Cpu {
                     _ => { panic!("jr condflags unknown {}", condflags);}
                 };
                 if condmet {
-                    self.set_pc(self.regs.pc.wrapping_add(addr_offset as u16));
+                    self.set_pc(self.regs.pc.wrapping_add(addr_offset));
                 }
                 println!("{} bytes: jr {}, {}", $n, stringify!($op1), stringify!($op2));
                 ($n as u8)
@@ -663,21 +671,23 @@ impl LR35902Cpu {
             }};
 
             (reti $n:expr) => {{
-                // TODO: how is RETI different than RET??
-                let  hi = self.load8(self.regs.sp) as u16;
-                self.regs.sp += 1;
                 let lo = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let  hi = self.load8(self.regs.sp) as u16;
                 self.regs.sp += 1;
                 let ret_addr = (hi << 8) | lo;
                 self.set_pc(ret_addr);
+                // enable interrupt when returning form ISR via RETI
+                self.ime = true;
                 println!("{} bytes: ret", $n);
                 ($n as u8)
             }};
 
             (ret $n:expr) => {{
-                let  hi = self.load8(self.regs.sp) as u16;
-                self.regs.sp += 1;
+                // grab low then high
                 let lo = self.load8(self.regs.sp) as u16;
+                self.regs.sp += 1;
+                let  hi = self.load8(self.regs.sp) as u16;
                 self.regs.sp += 1;
                 let ret_addr = (hi << 8) | lo;
                 self.set_pc(ret_addr);
@@ -695,9 +705,9 @@ impl LR35902Cpu {
                     _ => { panic!("ret cond: {} unknown", condflags); }
                 };
                 if cond_met {
-                    let  hi = self.load8(self.regs.sp) as u16;
-                    self.regs.sp += 1;
                     let lo = self.load8(self.regs.sp) as u16;
+                    self.regs.sp += 1;
+                    let  hi = self.load8(self.regs.sp) as u16;
                     self.regs.sp += 1;
                     let ret_addr = (hi << 8) | lo;
                     self.set_pc(ret_addr);
@@ -763,6 +773,7 @@ impl LR35902Cpu {
                     _ => { panic!("call cond flag: {} is unknown!", condflags); }
                 };
                 if cond_met {
+                    // push high then low bytes
                     self.regs.sp -= 1;
                     self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                     self.regs.sp -= 1;
@@ -775,6 +786,7 @@ impl LR35902Cpu {
             
             (call nn $n:expr) => {{
                 let addr = load!(nn);
+                // push high then low bytes
                 self.regs.sp -= 1;
                 self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                 self.regs.sp -= 1;
@@ -816,13 +828,17 @@ impl LR35902Cpu {
              }};
 
              (di $n:expr) => {{
-                // TODO: reset IME flag, prohibit maskable interrupts
+                 // NOTE: DI takes effect right away
+                 self.ime = false;
+                 self.prev_ime = false;
                  println!("{} bytes: di", $n);
                  ($n as u8)
              }}; 
              
              (ei $n:expr) => {{
-                // TODO: set IME flag, enable maskable interrupts
+                 // NOTE: EI is delayed 1 instruction. we set ime but use prev_ime to test
+                 // interrupt enable
+                 self.ime = true;
                  println!("{} bytes: ei", $n);
                  ($n as u8)
              }}; 
