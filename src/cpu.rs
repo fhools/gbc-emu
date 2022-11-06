@@ -76,8 +76,9 @@ macro_rules! use_z80_table {
 #[rustfmt::skip]
 macro_rules! use_z80_cb_table {
     ($run_macro:ident) => { indexing!($run_macro @start:
-         /*       00               01              02              03             04              05              06              07             */ 
+         /*       00/08            01/09           02/0A           03/0B          04/0C           05/0D           06/0E           07/0F          */ 
          /* 00 */ rlc b :1;        rlc c :1;       rlc d :1;       rlc e :1;      rlc h :1;       rlc l :1;       rlc (hl) :1;    rlc a :1;
+         /* 08 */ rrc b :1;        rrc c :1;       rrc d :1;       rrc e :1;      rrc h :1;       rrc l :1;       rrc (hl) :1;    rrc a :1;  
     )
     }
 }
@@ -849,6 +850,7 @@ impl LR35902Cpu {
         }
 
         macro_rules! gen_exec_cb_mne {
+
             (rlc $oper:tt $n:expr) => {{
                 let mut val = load!($oper) as u8;
                 let bit7 = val >> 7; 
@@ -858,7 +860,18 @@ impl LR35902Cpu {
                 self.regs.c = bit7;
                 println!("{} bytes: rlc {}", stringify!($n), stringify!($oper));
                 ($n as u8)
-            }}
+            }};
+
+            (rrc $oper:tt $n:expr) => {{
+                let mut aval = load!($oper) as u8;
+                let bit0 = aval & 0x01; 
+                aval = aval >> 1;
+                aval = (bit0 << 7) | aval;
+                store!($oper, aval);
+                self.regs.c = bit0;
+                println!("{} bytes: rrc {}", stringify!($n), stringify!($oper));
+                ($n as u8)
+            }};
         }
 
         /* generates a match clause to handle opcodes
@@ -1005,6 +1018,7 @@ impl LR35902Cpu {
             (a, $val:expr) => {{
                 self.regs.a = $val as u8;
             }};
+
             (b, $val:expr) => {{
                 self.regs.b = $val as u8;
             }};
