@@ -670,6 +670,10 @@ impl LR35902Cpu {
             (and $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
                 self.regs.a = self.regs.a & oprval;
+                self.regs.f.z = self.regs.a == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = true;
+                self.regs.f.c = false;
                 println!("{} bytes: and {}", $n, stringify!($opr));
                 ($n as u8)
             }};
@@ -677,6 +681,10 @@ impl LR35902Cpu {
             (xor $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
                 self.regs.a = self.regs.a ^ oprval;
+                self.regs.f.z = self.regs.a == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = false;
                 println!("{} bytes: xor {}", $n, stringify!($opr));
                 ($n as u8)
             }};
@@ -684,13 +692,21 @@ impl LR35902Cpu {
             (or $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
                 self.regs.a = self.regs.a | oprval;
+                self.regs.f.z = self.regs.a == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = false;
                 println!("{} bytes: or {}", $n, stringify!($opr));
                 ($n as u8)
             }};
 
             (cp $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
-                self.regs.f.z = (self.regs.a - oprval) == 0x0;
+                let (result, overflowed) = self.regs.a.overflowing_add(oprval);
+                self.regs.f.z = result == 0;
+                self.regs.f.n = true;
+                self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
+                self.regs.f.c = overflowed;
                 println!("{} bytes: cp {}", $n, stringify!($opr));
                 ($n as u8)
             }};
@@ -899,7 +915,10 @@ impl LR35902Cpu {
                 val = val << 1;
                 val = bit7 | val;
                 store!($oper, val);
-                self.regs.c = bit7;
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = bit7 == 1;
                 println!("{} bytes: rlc {}", stringify!($n), stringify!($oper));
                 ($n as u8)
             }};
@@ -911,27 +930,40 @@ impl LR35902Cpu {
                 val = val >> 1;
                 val = (bit0 << 7) | val;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
                 self.regs.c = bit0;
                 println!("{} bytes: rrc {}", stringify!($n), stringify!($oper));
                 ($n as u8)
             }};
 
-            // rotate left, carry into bit0
+            // rotate left, carry into bit0, bit7 into carry
             (rl $oper:tt $n:expr) => {{
                 let mut val = load!($oper) as u8;
+                let bit7 = val >> 7;
                 val = val << 1;
                 val = (self.regs.f.c as u8) | val;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = bit7 == 1;
                 println!("{} bytes: rl", $n);
                 ($n as u8)
             }};
 
-            // rotate right, carry into bit7
+            // rotate right, carry into bit7, bit0 into carry
             (rr $oper:tt $n:expr) => {{
                 let mut val= load!($oper) as u8;
+                let bit0 = val & 0x1;
                 val = val >> 1;
                 val = ((self.regs.f.c as u8) << 7) | val;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = bit0 == 1;
                 println!("{} bytes: rra", $n);
                 ($n as u8)
             }};
@@ -942,6 +974,9 @@ impl LR35902Cpu {
                 let bit7 = val >> 7;
                 val = val << 1;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
                 self.regs.f.c = bit7 == 0x1;
                 println!("{} bytes: sla {}", $n, stringify!($oper));
                 ($n as u8)
@@ -953,6 +988,9 @@ impl LR35902Cpu {
                 self.regs.f.c = (val & 0x1) == 1;
                 val = val >> 1;
                 store!($oper, val as u8);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
                 println!("{} bytes: sra {}", $n, stringify!($oper));
                 ($n as u8)
             }};
@@ -964,6 +1002,10 @@ impl LR35902Cpu {
                 let hi = val >> 4; 
                 val = lo << 4 | hi;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
+                self.regs.f.c = false;
                 println!("{} bytes: swap {}", $n, stringify!($oper));
                 ($n as u8)
             }};
@@ -974,6 +1016,9 @@ impl LR35902Cpu {
                 self.regs.f.c = (val & 0x1) == 1;
                 val = val >> 1;
                 store!($oper, val);
+                self.regs.f.z = val == 0;
+                self.regs.f.n = false;
+                self.regs.f.h = false;
                 println!("{} bytes: srl {}", $n, stringify!($oper));
                 ($n as u8)
             }};
@@ -983,6 +1028,8 @@ impl LR35902Cpu {
                 let val = load!($reg);
                 let bit = (val >> $bitpos) & 0x1;
                 self.regs.f.z = bit == 1;
+                self.regs.f.n = false;
+                self.regs.f.h = true;
                 println!("{} bytes: bit {} {}", $n, $bitpos, stringify!($reg));
                 ($n as u8)
             }};
