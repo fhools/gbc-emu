@@ -81,6 +81,34 @@ macro_rules! use_z80_cb_table {
          /* 08 */ rrc b :1;        rrc c :1;       rrc d :1;       rrc e :1;      rrc h :1;       rrc l :1;       rrc (hl) :1;    rrc a :1;  
          /* 10 */ rl b :1;         rl c :1;        rl d :1;        rl e :1;       rl h :1;        rl l :1;        rl (hl) :1;     rl a :1;
          /* 18 */ rr b :1;         rr c :1;        rr d :1;        rr e :1;       rr h :1;        rr l :1;        rr (hl) :1;     rr a :1;  
+         /* 20 */ sla b :1;        sla c :1;       sla d :1;       sla e :1;      sla h :1;       sla l :1;       sla (hl) :1;    sla a :1;
+         /* 28 */ sra b :1;        sra c :1;       sra d :1;       sra e :1;      sra h :1;       sra l :1;       sra (hl) :1;    sra a :1;
+         /* 30 */ swap b :1;       swap c :1;      swap d :1;      swap e :1;     swap h :1;      swap l :1;      swap (hl) :1;   swap a :1;
+         /* 38 */ srl b :1;        srl c :1;       srl d :1;       srl e :1;      srl h :1;       srl l :1;       srl (hl) :1;    srl a :1;
+         /* 40 */ bit 0, b :1;     bit 0, c :1;    bit 0, d :1;    bit 0, e :1;   bit 0, h :1;    bit 0, l :1;    bit 0, (hl) :1; bit 0, a :1;
+         /* 48 */ bit 1, b :1;     bit 1, c :1;    bit 1, d :1;    bit 1, e :1;   bit 1, h :1;    bit 1, l :1;    bit 1, (hl) :1; bit 1, a :1;
+         /* 50 */ bit 2, b :1;     bit 2, c :1;    bit 2, d :1;    bit 2, e :1;   bit 2, h :1;    bit 2, l :1;    bit 2, (hl) :1; bit 2, a :1;
+         /* 58 */ bit 3, b :1;     bit 3, c :1;    bit 3, d :1;    bit 3, e :1;   bit 3, h :1;    bit 3, l :1;    bit 3, (hl) :1; bit 3, a :1;
+         /* 60 */ bit 4, b :1;     bit 4, c :1;    bit 4, d :1;    bit 4, e :1;   bit 4, h :1;    bit 4, l :1;    bit 4, (hl) :1; bit 4, a :1;
+         /* 68 */ bit 5, b :1;     bit 5, c :1;    bit 5, d :1;    bit 5, e :1;   bit 5, h :1;    bit 5, l :1;    bit 5, (hl) :1; bit 5, a :1;
+         /* 70 */ bit 6, b :1;     bit 6, c :1;    bit 6, d :1;    bit 6, e :1;   bit 6, h :1;    bit 6, l :1;    bit 6, (hl) :1; bit 6, a :1;
+         /* 78 */ bit 7, b :1;     bit 7, c :1;    bit 7, d :1;    bit 7, e :1;   bit 7, h :1;    bit 7, l :1;    bit 7, (hl) :1; bit 7, a :1;
+         /* 80 */ res 0, b :1;     res 0, c :1;    res 0, d :1;    res 0, e :1;   res 0, h :1;    res 0, l :1;    res 0, (hl) :1; res 0, a :1;
+         /* 88 */ res 1, b :1;     res 1, c :1;    res 1, d :1;    res 1, e :1;   res 1, h :1;    res 1, l :1;    res 1, (hl) :1; res 1, a :1;
+         /* 90 */ res 2, b :1;     res 2, c :1;    res 2, d :1;    res 2, e :1;   res 2, h :1;    res 2, l :1;    res 2, (hl) :1; res 2, a :1;
+         /* 98 */ res 3, b :1;     res 3, c :1;    res 3, d :1;    res 3, e :1;   res 3, h :1;    res 3, l :1;    res 3, (hl) :1; res 3, a :1;
+         /* A0 */ res 4, b :1;     res 4, c :1;    res 4, d :1;    res 4, e :1;   res 4, h :1;    res 4, l :1;    res 4, (hl) :1; res 4, a :1;
+         /* A8 */ res 5, b :1;     res 5, c :1;    res 5, d :1;    res 5, e :1;   res 5, h :1;    res 5, l :1;    res 5, (hl) :1; res 5, a :1;
+         /* B0 */ res 6, b :1;     res 6, c :1;    res 6, d :1;    res 6, e :1;   res 6, h :1;    res 6, l :1;    res 6, (hl) :1; res 6, a :1;
+         /* B8 */ res 7, b :1;     res 7, c :1;    res 7, d :1;    res 7, e :1;   res 7, h :1;    res 7, l :1;    res 7, (hl) :1; res 7, a :1;
+         /* C0 */ set 0, b :1;     set 0, c :1;    set 0, d :1;    set 0, e :1;   set 0, h :1;    set 0, l :1;    set 0, (hl) :1; set 0, a :1;
+         /* C8 */ set 1, b :1;     set 1, c :1;    set 1, d :1;    set 1, e :1;   set 1, h :1;    set 1, l :1;    set 1, (hl) :1; set 1, a :1;
+         /* D0 */ set 2, b :1;     set 2, c :1;    set 2, d :1;    set 2, e :1;   set 2, h :1;    set 2, l :1;    set 2, (hl) :1; set 2, a :1;
+         /* D8 */ set 3, b :1;     set 3, c :1;    set 3, d :1;    set 3, e :1;   set 3, h :1;    set 3, l :1;    set 3, (hl) :1; set 3, a :1;
+         /* E0 */ set 4, b :1;     set 4, c :1;    set 4, d :1;    set 4, e :1;   set 4, h :1;    set 4, l :1;    set 4, (hl) :1; set 4, a :1;
+         /* E8 */ set 5, b :1;     set 5, c :1;    set 5, d :1;    set 5, e :1;   set 5, h :1;    set 5, l :1;    set 5, (hl) :1; set 5, a :1;
+         /* F0 */ set 6, b :1;     set 6, c :1;    set 6, d :1;    set 6, e :1;   set 6, h :1;    set 6, l :1;    set 6, (hl) :1; set 6, a :1;
+         /* F8 */ set 7, b :1;     set 7, c :1;    set 7, d :1;    set 7, e :1;   set 7, h :1;    set 7, l :1;    set 7, (hl) :1; set 7, a :1;
     )
     }
 }
@@ -907,6 +935,76 @@ impl LR35902Cpu {
                 println!("{} bytes: rra", $n);
                 ($n as u8)
             }};
+
+            // shift left, bit7 into carry
+            (sla $oper:tt $n:expr) => {{
+                let mut val = load!($oper) as u8;
+                let bit7 = val >> 7;
+                val = val << 1;
+                store!($oper, val);
+                self.regs.f.c = bit7 == 0x1;
+                println!("{} bytes: sla {}", $n, stringify!($oper));
+                ($n as u8)
+            }};
+
+            // arithmetic shift right, bit0 into carry, bit 7 unchanged
+            (sra $oper:tt $n:expr) => {{
+                let mut val = load!($oper) as i8;
+                self.regs.f.c = (val & 0x1) == 1;
+                val = val >> 1;
+                store!($oper, val as u8);
+                println!("{} bytes: sra {}", $n, stringify!($oper));
+                ($n as u8)
+            }};
+
+            // swap the nibbles of register
+            (swap $oper:tt $n:expr) => {{
+                let mut val = load!($oper);
+                let lo = val & 0xF;
+                let hi = val >> 4; 
+                val = lo << 4 | hi;
+                store!($oper, val);
+                println!("{} bytes: swap {}", $n, stringify!($oper));
+                ($n as u8)
+            }};
+
+            // logical shift right, bit0 into carry
+            (srl $oper:tt $n:expr) => {{
+                let mut val = load!($oper);
+                self.regs.f.c = (val & 0x1) == 1;
+                val = val >> 1;
+                store!($oper, val);
+                println!("{} bytes: srl {}", $n, stringify!($oper));
+                ($n as u8)
+            }};
+
+            // bit n, reg. copies bit n of reg into z flag
+            (bit $bitpos:literal $reg:tt $n:expr) => {{
+                let val = load!($reg);
+                let bit = (val >> $bitpos) & 0x1;
+                self.regs.f.z = bit == 1;
+                println!("{} bytes: bit {} {}", $n, $bitpos, stringify!($reg));
+                ($n as u8)
+            }};
+
+            // clear bit n of register  reg
+            (res $bitpos:literal $reg:tt $n:expr) => {{
+                let mut val = load!($reg);
+                val = val & (!(1 << $bitpos));
+                store!($reg, val);
+                println!("{} bytes: res {} {}", $n, $bitpos, stringify!($reg));
+                ($n as u8)
+            }};
+
+            // set bit n of register reg
+            (set $bitpos:literal $reg:tt $n:expr) => {{
+                let mut val = load!($reg);
+                val = val | (1 << $bitpos);
+                store!($reg, val);
+                println!("{} bytes: set {} {}", $n, $bitpos, stringify!($reg));
+                ($n as u8)
+            }};
+
         }
 
         /* generates a match clause to handle opcodes
