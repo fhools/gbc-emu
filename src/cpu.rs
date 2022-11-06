@@ -72,11 +72,12 @@ macro_rules! use_z80_table {
     }
 }
 
+// NOTES: the instruction length in this case does not include the cb prefix. 
 #[rustfmt::skip]
 macro_rules! use_z80_cb_table {
     ($run_macro:ident) => { indexing!($run_macro @start:
          /*       00               01              02              03             04              05              06              07             */ 
-         /* 00 */ TODO :1; 
+         /* 00 */ rlc b :1;        rlc c :1;       rlc d :1;       rlc e :1;      rlc h :1;       rlc l :1;       rlc (hl) :1;    rlc a :1;
     )
     }
 }
@@ -864,6 +865,27 @@ impl LR35902Cpu {
 
         }
 
+        macro_rules! gen_a_z80_cb_handler {
+            ($mne:ident [] $n:expr) => { 
+                gen_exec_cb_mne!($mne $n)
+            };
+
+            ($mne:ident [$opr:tt] $n:expr) => {
+                gen_exec_cb_mne!($mne $opr $n)
+            };
+
+            ($mne:ident [$dst:tt, $src:tt] $n:expr) => {
+                gen_exec_cb_mne!($mne $dst $src $n)
+            };
+        }
+
+        macro_rules! gen_exec_cb_mne {
+            (rlc $oper:tt $n:expr) => {{
+                println!("{} bytes: rlc {}", stringify!($n), stringify!($oper));
+                ($n as u8)
+            }}
+        }
+
         /* generates a match clause to handle opcodes
          * prints out the disassembled instruction
          */
@@ -884,10 +906,10 @@ impl LR35902Cpu {
 
         macro_rules! gen_z80_exec_cb_handlers {
             ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {{
-                let  opc_cb = self.load8(self.pc().wrapping_add(1));
+                let  opc_cb = self.fetch8();
                 match opc_cb {
                     $( ConstEval::<{$ix}>::VALUE => {
-                        gen_a_z80_handler!($mne $opr $n)
+                        gen_a_z80_cb_handler!($mne $opr $n)
                     }, )*
                     _=> { panic!("problem!"); }
                 }
@@ -1121,9 +1143,11 @@ fn test_disasm() {
                        0xbe, // z80 is little endien so 0xbabe is 0xbe 0xba
                        0xba,
                        0x25,
+                       0xCB, // rlc b 
+                       0x00,
                        0xC3, // jp 0x0000 ; go back to beginning
                        0x00,
-                       0x00
+                       0x00,
     ]; 
     let bus = Shared::new(Bus::new(&code_buffer)); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
