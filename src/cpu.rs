@@ -421,14 +421,12 @@ impl LR35902Cpu {
             (inc $opr:tt $n:expr) => {{
                 let prev_val = load!($opr);
                 if std::mem::size_of_val(&prev_val) == 1 {
-                    println!("incrementing u8 register");
                     let val: u8 = prev_val.wrapping_add(1) as u8;
                     self.regs.f.z = (val == 0);
                     self.regs.f.n = false;
                     self.regs.f.h = ((prev_val as u8) ^ val) & 0x10 != 0;
                     store!($opr, val);
                 } else {
-                    println!("incrementing u16 register");
                     let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_add(1));
                 }
@@ -497,6 +495,7 @@ impl LR35902Cpu {
 
             (jr $op1:tt $op2:tt $n:expr) => {{
                 let addr_offset = load!($op2) as i8 as i16 as u16;
+                let addr = self.regs.pc.wrapping_add(addr_offset as u16);
                 let condflags = stringify!($op1); 
                 let condmet = match condflags {
                     "nz" => { !self.regs.f.z },
@@ -508,7 +507,7 @@ impl LR35902Cpu {
                 if condmet {
                     self.set_pc(self.regs.pc.wrapping_add(addr_offset));
                 }
-                println!("{} bytes: jr {}, {}", $n, stringify!($op1), stringify!($op2));
+                println!("{} bytes: jr {}, {:#06X} (final: {:#06X})", $n, stringify!($op1), addr_offset, addr);
                 ($n as u8)
             }};
 
@@ -637,23 +636,37 @@ impl LR35902Cpu {
             (adc $dst:tt $src:tt $n:expr) => {{
                 let dstval = load!($dst);
                 let srcval = load!($src);
-                let result = dstval + srcval + (self.regs.f.c as u8);
-                // TODO: set carry/h flags
-                store!($dst, result);
+                let (result, overflowed) = dstval.overflowing_add(srcval);
+                let (result2, overflowed2) = result.overflowing_add((self.regs.f.c as u8));
+                self.regs.f.z = result2 == 0;  
+                self.regs.f.n = false;
+                self.regs.f.h = (result2 ^ dstval ^ srcval) & 0x10 != 0; 
+                self.regs.f.c = overflowed | overflowed2;
+                store!($dst, result2);
                 println!("{} bytes: adc {}, {}", $n, stringify!($dst), stringify!($src));
                 ($n as u8)
             }};
 
             (sub $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
-                self.regs.a = self.regs.a - oprval;
+                let (result, overflowed) = self.regs.a.overflowing_sub(oprval);
+                self.regs.f.z = result == 0;
+                self.regs.f.n = true;
+                self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
+                self.regs.f.c = overflowed;
+                store!(a, result);
                 println!("{} bytes: sub {}", $n, stringify!($opr));
                 ($n as u8)
             }};
 
             (sub $n:expr) => {{
                 let oprval = load!(n);
-                self.regs.a = self.regs.a - oprval;
+                let (result, overflowed) = self.regs.a.overflowing_sub(oprval);
+                self.regs.f.z = result == 0;
+                self.regs.f.n = true;
+                self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
+                self.regs.f.c = overflowed;
+                store!(a, result);
                 println!("{} bytes: sub {:#04X}", $n, oprval);
                 ($n as u8)
             }};
@@ -758,34 +771,38 @@ impl LR35902Cpu {
             }};
            
             (pop bc $n:expr) => {{
-                let hi = self.load8(self.regs.sp);
-                let lo = self.load8(self.regs.sp + 1);
+                let lo = self.load8(self.regs.sp);
+                let hi = self.load8(self.regs.sp + 1);
                 self.regs.set_bc( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
+                println!("{} bytes: pop bc ", $n);
                 ($n as u8)
             }};
 
             (pop de $n:expr) => {{
-                let hi = self.load8(self.regs.sp);
-                let lo = self.load8(self.regs.sp + 1);
+                let lo = self.load8(self.regs.sp);
+                let hi = self.load8(self.regs.sp + 1);
                 self.regs.set_de( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
+                println!("{} bytes: pop de ", $n);
                 ($n as u8)
             }};
 
             (pop hl $n:expr) => {{
-                let hi = self.load8(self.regs.sp);
-                let lo = self.load8(self.regs.sp + 1);
+                let lo = self.load8(self.regs.sp);
+                let hi = self.load8(self.regs.sp + 1);
                 self.regs.set_hl( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
+                println!("{} bytes: pop hl ", $n);
                 ($n as u8)
             }};
 
             (pop af $n:expr) => {{
-                let hi = self.load8(self.regs.sp);
-                let lo = self.load8(self.regs.sp + 1);
+                let lo = self.load8(self.regs.sp);
+                let hi = self.load8(self.regs.sp + 1);
                 self.regs.set_af( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
+                println!("{} bytes: pop af ", $n);
                 ($n as u8)
             }};
 
@@ -795,6 +812,7 @@ impl LR35902Cpu {
                 self.store8(self.regs.sp, (regval >> 8) as u8);
                 self.regs.sp -= 1;
                 self.store8(self.regs.sp, (regval & 0xFF) as u8);
+                println!("{} bytes: push {} ", $n, stringify!($reg));
                 ($n as u8)
 
             }};
@@ -1290,13 +1308,15 @@ impl LR35902Cpu {
 
 impl std::fmt::Debug for LR35902Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "REGS: PC: {:#06X} A: {:#06X} BC: {:#06X} DE: {:#06X} HL: {:#06X} SP: {:#06X} Flags: z:{} n:{} h:{} c:{}",
+        write!(f, "REGS: PC: {:#06X} A: {:#06X} BC: {:#06X} DE: {:#06X} HL: {:#06X} SP: {:#06X} SPVAL: 0x{:02X}{:02X} Flags: z:{} n:{} h:{} c:{}",
                self.regs.pc,
                self.regs.a,
                self.regs.bc(),
                self.regs.de(),
                self.regs.hl(),
                self.regs.sp,
+               self.load8(self.regs.sp + 1),
+               self.load8(self.regs.sp),
                if self.regs.f.z  { "1" } else { "0"},
                if self.regs.f.n  { "1" } else { "0"},
                if self.regs.f.h  { "1" } else { "0"},
@@ -1305,8 +1325,7 @@ impl std::fmt::Debug for LR35902Cpu {
     }
 }
 
-
-                
+#[ignore]
 #[test]
 fn test_disasm() {
     use crate::cpu::LR35902Cpu;
@@ -1346,6 +1365,25 @@ fn test_disasm() {
         println!("{:?}", cpu);
     }
 
+}
+
+#[test]
+fn test_run_gb() {
+    use crate::cpu::LR35902Cpu;
+    use crate::rom::read_rom;
+    let rom = read_rom("cpu_instrs.gb").unwrap();
+    println!("rom size: {}", rom.len());
+    println!("rom: {:?}", rom);
+    let bus = Shared::new(Bus::new(&rom));
+    let mut cpu = LR35902Cpu::new(0x100, bus.clone());
+    println!("instructions executed: {}", cpu.instructions_executed());
+    // Execute instructions (may hop around due to jumps/calls)
+    const MAX_INSTRUCTIONS_TO_RUN : i32 = 999999;
+    while (cpu.pc() as i32) < (rom.len() as i32) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
+        cpu.exec_one_instruction() as usize;
+        println!("CPU:");
+        println!("{:?}", cpu);
+    }
 }
 
 #[test]
