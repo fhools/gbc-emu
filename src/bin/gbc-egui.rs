@@ -36,11 +36,13 @@ impl eframe::App for GbcApp {
             let opcode = self.cpu.load8(self.cpu.pc());
             let (_, disasm) = self.cpu.disasm(opcode);
             ui.label(format!("{}", disasm));
-            if ui.button("Step").clicked() {
-                if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
-                    self.cpu.exec_one_instruction() as usize;
+            ui.add_enabled_ui(!self.run_continuous, |ui| {
+                if ui.button("Step").clicked() {
+                    if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
+                        self.cpu.exec_one_instruction() as usize;
+                    }
                 }
-            }
+            });
             ui.checkbox(&mut self.run_continuous, "Run");
             if  self.run_continuous {
                 if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
