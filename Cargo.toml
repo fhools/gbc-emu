@@ -6,12 +6,18 @@ author = "fhools"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]
-name = "gbc-emu"
+name = "gbc-cli"
 path = "src/bin/main.rs"
 
+[[bin]]
+name="gbc-emu-egui"
+path = "src/bin/gbc-egui.rs"
+
 [lib]
+name="gbc_emu"
 path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0"
 thiserror = "1.0"
+eframe = "0.19.0"

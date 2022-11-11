@@ -245,7 +245,7 @@ pub struct CpuStatistics {
  */
 pub struct LR35902Cpu {
     bus: Shared<Bus>,
-    regs: Registers,
+    pub regs: Registers,
     prev_ime: bool, // since EI instruction effect is delayed, we use prev_ime to actually test 
                     // if interrupt processing should occur
     ime: bool,     // interrupt enable flag
@@ -254,7 +254,7 @@ pub struct LR35902Cpu {
 
 impl LR35902Cpu {
 
-    fn new(start_pc: u16, bus: Shared<Bus>) -> Self {
+    pub fn new(start_pc: u16, bus: Shared<Bus>) -> Self {
         let mut cpu = LR35902Cpu {
             bus,
             regs: Default::default(),
@@ -268,33 +268,33 @@ impl LR35902Cpu {
 
     // load byte at pc and update pc, used for instructions that fetch data 
     // has immediate data
-    fn fetch8(&mut self) -> u8 {
+    pub fn fetch8(&mut self) -> u8 {
         let byte = self.bus.read8(self.regs.pc);
         self.set_pc(self.regs.pc + 1);
         byte
     }
 
     // same as fetch8 but update pc twice and grab u16
-    fn fetch16(&mut self) -> u16 {
+    pub fn fetch16(&mut self) -> u16 {
         let lo = self.bus.read8(self.regs.pc);
         let hi = self.bus.read8(self.regs.pc+1);
         self.set_pc(self.regs.pc + 2);
         (lo as u16) | ((hi as u16)<< 8)
     }
 
-    fn load8(&self, addr: u16) -> u8 {
+    pub fn load8(&self, addr: u16) -> u8 {
         self.bus.read8(addr)
     }
 
-    fn store8(&mut self, addr: u16, val: u8) {
+    pub fn store8(&mut self, addr: u16, val: u8) {
         self.bus.write8(addr, val);
     }
 
-    fn pc(&self) -> u16 {
+    pub fn pc(&self) -> u16 {
         self.regs.pc
     }
 
-    fn set_pc(&mut self, pc: u16) {
+    pub fn set_pc(&mut self, pc: u16) {
         self.regs.pc = pc;
     }
 
@@ -305,7 +305,7 @@ impl LR35902Cpu {
      * returns the length of the instruction, this will
      * be used to drive the rest of the disassembly
      */
-    fn disasm(&self, opc: u8) -> u8 {
+    pub fn disasm(&self, opc: u8) -> (u8, String) {
 
         macro_rules! gen_z80_disasm_handlers {
             ($($ix:expr => $mne:tt $opr:tt, $n:expr;)*) => {
@@ -319,27 +319,24 @@ impl LR35902Cpu {
 
             (@one $mne:ident [] $n:expr) => {{
                 let dasm = stringify!($mne);
-                println!("{}", dasm);
-                ($n as u8)
+                (($n as u8), dasm.into())
             }};
 
             (@one $mne:ident [$opr:tt] $n:expr) => {{
                 let dasm = format!("{} {}", stringify!($mne), stringify!($opr));
                 println!("{}", dasm);
-                ($n as u8)
+                (($n as u8), dasm.into())
             }};
 
             (@one $mne:ident [$dst:tt, $src:tt] $n:expr) => {{
                 let dasm = format!("{} {}, {}", stringify!($mne), stringify!($dst), stringify!($src));
-                println!("{}", dasm);
-                ($n as u8)
+                (($n as u8), dasm.into())
 
             }};
 
             (@one cb [] $n:expr) => {{
                 let dasm = "cb dasm unimplemented!";
-                println!("{}", dasm);
-                ($n as u8)
+                (($n as u8), dasm.into())
             }};
         }
 
@@ -348,7 +345,7 @@ impl LR35902Cpu {
     }
 
 
-    fn exec_one_instruction(&mut self) -> u8 {
+    pub fn exec_one_instruction(&mut self) -> u8 {
         let opc = self.fetch8();
 
         macro_rules! gen_a_z80_handler {
@@ -376,6 +373,7 @@ impl LR35902Cpu {
                 let srcval = load!(a);
                 let addr = 0xFF00 + lo;
                 self.store8(addr, srcval);
+                println!("{} bytes: ld (n) addr:{:#X} a", $n, addr);
                 ($n as u8)
             }};
 
@@ -384,6 +382,7 @@ impl LR35902Cpu {
                 let addr = 0xFF00 + lo;
                 let val = self.load8(addr);
                 store!(a, val);
+                println!("{} bytes: ld a (n) addr:{:#X}  ", $n, addr);
                 ($n as u8)
             }};
 
@@ -392,6 +391,7 @@ impl LR35902Cpu {
                 let srcval = load!(a);
                 let addr = 0xFF00 + lo;
                 self.store8(addr, srcval);
+                println!("{} bytes: ld (c) addr:{:#X} a ", $n, addr);
                 ($n as u8)
             }};
 
@@ -400,6 +400,7 @@ impl LR35902Cpu {
                 let addr = 0xFF00 + lo;
                 let val = self.load8(addr);
                 store!(a, val);
+                println!("{} bytes: ld a (c) addr:{:#X}", $n, addr);
                 ($n as u8)
             }};
 
@@ -408,6 +409,7 @@ impl LR35902Cpu {
                 let spval = load!(sp) as u16;
                 let val = spval.wrapping_add(lo); 
                 store!(hl, val);
+                println!("{} bytes: ld hl spn ", $n);
                 ($n as u8)
             }};
 
@@ -444,7 +446,6 @@ impl LR35902Cpu {
                     self.regs.f.h = ((prev_val as u8) ^ val) & 0x10 != 0;
                     store!($opr, val);
                 } else {
-                    println!("decrementing {} u16 register", stringify!($opr));
                     let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_sub(1));
                 } 
@@ -490,6 +491,7 @@ impl LR35902Cpu {
                 let addr_offset = load!(s8);
                 let addr = self.regs.pc.wrapping_add(addr_offset as u16);
                 self.set_pc(addr);
+                println!("{} bytes: jr {:#X}", $n, addr);
                 ($n as u8)
             }};
 
@@ -605,6 +607,7 @@ impl LR35902Cpu {
                 self.regs.f.z = (aval == 0x00);
                 self.regs.f.h = false;
                 store!(a, aval);
+                println!("{} bytes: daa", $n);
                 ($n as u8)
             }};
 
@@ -733,7 +736,7 @@ impl LR35902Cpu {
                 self.set_pc(ret_addr);
                 // enable interrupt when returning form ISR via RETI
                 self.ime = true;
-                println!("{} bytes: ret", $n);
+                println!("{} bytes: reti", $n);
                 ($n as u8)
             }};
 
@@ -839,7 +842,7 @@ impl LR35902Cpu {
                     self.store8(self.regs.sp, (self.regs.pc &0xFF) as u8);
                     self.set_pc(addr);
                 }
-                println!("{} bytes: call nz {:x}", $n, addr);
+                println!("{} bytes: call {} {:x}", $n, condflags, addr);
                 ($n as u8)
             }};
             
@@ -851,14 +854,14 @@ impl LR35902Cpu {
                 self.regs.sp -= 1;
                 self.store8(self.regs.sp, (self.regs.pc &0xFF) as u8);
                 self.set_pc(addr);
-                println!("{} bytes: call nz {:x}", $n, addr);
+                println!("{} bytes: call nn (addr:{:#X})", $n, addr);
                 ($n as u8)
             }};
              
              (jp nn $n:expr) => {{ 
                 let addr = load!(nn);
                 self.set_pc(addr);
-                println!("{} bytes: jp {:x}", $n, addr);
+                println!("{} bytes: jp nn:{:#06X}", $n, addr);
                 ($n as u8)
              }};
 
@@ -875,7 +878,7 @@ impl LR35902Cpu {
                  if cond_met {
                      self.set_pc(addr);
                  }
-                 println!("{} bytes: jp {} {:x}", $n, condflags, addr);
+                 println!("{} bytes: jp {} {:#06X}", $n, condflags, addr);
                 ($n as u8)
              }};
 
@@ -1308,9 +1311,9 @@ impl LR35902Cpu {
 
 impl std::fmt::Debug for LR35902Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "REGS: PC: {:#06X} A: {:#06X} BC: {:#06X} DE: {:#06X} HL: {:#06X} SP: {:#06X} SPVAL: 0x{:02X}{:02X} Flags: z:{} n:{} h:{} c:{}",
+        write!(f, "REGS: PC: {:#06X} AF: {:#06X} BC: {:#06X} DE: {:#06X} HL: {:#06X} SP: {:#06X} SPVAL: 0x{:02X}{:02X} Flags: z:{} n:{} h:{} c:{}",
                self.regs.pc,
-               self.regs.a,
+               self.regs.af(),
                self.regs.bc(),
                self.regs.de(),
                self.regs.hl(),
@@ -1352,7 +1355,7 @@ fn test_disasm() {
     // Disassemble.  simple view, does not show operand values
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.load8(cpu.pc()); 
-        let oplen = cpu.disasm(opcode) as usize;
+        let (oplen, _) = cpu.disasm(opcode) as usize;
         cpu.set_pc(cpu.pc() + (oplen as u16));
     }
   
@@ -1378,7 +1381,7 @@ fn test_run_gb() {
     let mut cpu = LR35902Cpu::new(0x100, bus.clone());
     println!("instructions executed: {}", cpu.instructions_executed());
     // Execute instructions (may hop around due to jumps/calls)
-    const MAX_INSTRUCTIONS_TO_RUN : i32 = 999999;
+    const MAX_INSTRUCTIONS_TO_RUN : i32 = 99999999;
     while (cpu.pc() as i32) < (rom.len() as i32) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
         cpu.exec_one_instruction() as usize;
         println!("CPU:");

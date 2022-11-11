@@ -1,5 +1,5 @@
 #![recursion_limit="1024"]
-mod rom;
-mod cpu;
-mod util;
-mod bus;
+pub mod rom;
+pub mod cpu;
+pub mod util;
+pub mod bus;
