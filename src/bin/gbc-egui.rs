@@ -3,17 +3,19 @@ use gbc_emu::bus;
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
 use eframe::egui;
+use std::time::Duration;
 
 struct GbcApp {
     cpu: cpu::LR35902Cpu,
     bus: Shared<bus::Bus>,
     run_continuous: bool,
+    cycles: u64,
 }
 
 impl GbcApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
-        let rom = read_rom("cpu_instrs.gb").unwrap();
+        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         println!("rom size: {}", rom.len());
         let gbc_bus = Shared::new(bus::Bus::new(&rom));
         let gbc_cpu = cpu::LR35902Cpu::new(0x100, gbc_bus.clone());
@@ -21,6 +23,7 @@ impl GbcApp {
             cpu: gbc_cpu,
             bus: gbc_bus,
             run_continuous: false,
+            cycles: 0
         }
     }
 }
@@ -85,6 +88,11 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+fn show_instr(app: &GbcApp, pc: u16) -> String {
+    let opcode = app.cpu.load8(pc);
+    let (_, disasm) = app.cpu.disasm(opcode);
+    format!("{}", disasm)
+}
 impl eframe::App for GbcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -105,18 +113,18 @@ impl eframe::App for GbcApp {
             let stackoutput = hexdump(&stackbuf, self.cpu.regs.sp, true);
             ui.label(&stackoutput); 
 
+            // Display Timer Counter
+            ui.label(format!("TIMA: {:4X}", self.cpu.bus.timer.tima));
+
             // Display current instruction disassembled. 
-            let opcode = self.cpu.load8(self.cpu.pc());
-            let (_, disasm) = self.cpu.disasm(opcode);
-            ui.label(format!("{}", disasm));
+            ui.label(show_instr(self, self.cpu.pc()));
            
             // If not in continous run mode, display step button
             ui.add_enabled_ui(!self.run_continuous, |ui| {
-
                 // Execute one instruction on step clicked
                 if ui.button("Step").clicked() {
                     if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
-                        self.cpu.exec_one_instruction() as usize;
+                        self.cpu.step();
                     }
                 }
             });
@@ -124,12 +132,38 @@ impl eframe::App for GbcApp {
             // Enable/Disable continous running
             ui.checkbox(&mut self.run_continuous, "Run");
             if  self.run_continuous {
+                let prev_cycles = self.cycles;
+                let mut cycles_accum: u64= 0;
+
                 if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
-                    self.cpu.exec_one_instruction();
-                    // Must call request_repaint() otherwise update() won't be triggered unless GUI event
-                    // happens
-                    ctx.request_repaint();
+                    // there are 17476 cpu ticks  in a frame of 60 FPS
+                    while cycles_accum < 17476 {
+                        // compute cycle delta
+                        let prev_pc = self.cpu.pc();
+                        let mut cpu_cycle = self.cpu.step() as u64;
+                        if cpu_cycle == 0 {
+                            self.run_continuous = false;
+                            cpu_cycle = 1; // force it
+                            println!("cpu.step returned nothing! prev instr: {}", show_instr(self, prev_pc));
+                        }
+                        self.cycles  = self.cycles.wrapping_add(cpu_cycle);
+                        let mut delta: u64 = if prev_cycles < self.cycles {
+                            self.cycles - prev_cycles
+                        } else {
+                            self.cycles + (std::u64::MAX - prev_cycles)
+                        };
+                        cycles_accum = cycles_accum.wrapping_add(delta as u64); 
+                    }
+                    
+                    // sleep for 1/60 of a sec
+                    // TODO: magic number
+                    let time_per_frame_in_micro =  1.0/(60 as f32) * 1_000_000.0;
+                    let frame_time = Duration::from_micros(time_per_frame_in_micro as u64);
+                    std::thread::sleep(frame_time);
                 }
+                // Must call request_repaint() otherwise update() won't be triggered unless GUI event
+                // happens
+                ctx.request_repaint();
             }
         });
     }

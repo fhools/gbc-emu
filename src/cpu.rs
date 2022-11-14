@@ -244,7 +244,7 @@ pub struct CpuStatistics {
  *
  */
 pub struct LR35902Cpu {
-    bus: Shared<Bus>,
+    pub bus: Shared<Bus>,
     pub regs: Registers,
     prev_ime: bool, // since EI instruction effect is delayed, we use prev_ime to actually test 
                     // if interrupt processing should occur
@@ -298,6 +298,16 @@ impl LR35902Cpu {
         self.regs.pc = pc;
     }
 
+    pub fn get_ld_cycles(&self, opr: &str) -> u8 {
+        match opr {
+            "a"|"f"|"b"|"c"|"h"|"l"|"d"|"e" => 0,
+            "n"|"(de)"|"(bc)"|"(hl +)"|"(hl -)"|"(hl)"|"hl"|"bc"|"de"|"af" => 1,
+            "nn"|"(n)"|"(nn)" => 2,
+            // TODO: LD SP,HL is 2 cycles
+            "sp" => 1,
+            _ => panic!("unknown ld opr: {}", opr)
+        }
+    }
     /*
      * disassemble opcode, using pc to fetch the rest of 
      * the instruction operands 
@@ -317,6 +327,10 @@ impl LR35902Cpu {
                 }
             };
 
+            (@one cb [] $n:expr) => {{
+                let dasm = "cb dasm unimplemented!";
+                (($n as u8), dasm.into())
+            }};
             (@one $mne:ident [] $n:expr) => {{
                 let dasm = stringify!($mne);
                 (($n as u8), dasm.into())
@@ -333,10 +347,6 @@ impl LR35902Cpu {
 
             }};
 
-            (@one cb [] $n:expr) => {{
-                let dasm = "cb dasm unimplemented!";
-                (($n as u8), dasm.into())
-            }};
         }
 
         use_z80_table!(gen_z80_disasm_handlers)
@@ -344,7 +354,14 @@ impl LR35902Cpu {
     }
 
 
-    pub fn exec_one_instruction(&mut self) -> u8 {
+    pub fn step(&mut self) -> u8 {
+        let (_, cycles) = self.exec_one_instruction();
+        self.bus.tick(); 
+        cycles
+    }
+
+    // Returns (instruction length in bytes, cycles)
+    pub fn exec_one_instruction(&mut self) -> (u8, u8) {
         let opc = self.fetch8();
 
         macro_rules! gen_a_z80_handler {
@@ -364,7 +381,7 @@ impl LR35902Cpu {
         macro_rules! gen_exec_mne {
             (nop $n:expr) => {{
                 //println!("{} bytes: {}", $n, "nop");
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             (ld (n)  a $n:expr) => {{
@@ -373,7 +390,7 @@ impl LR35902Cpu {
                 let addr = 0xFF00 + lo;
                 self.store8(addr, srcval);
                 //println!("{} bytes: ld (n) addr:{:#X} a", $n, addr);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (ld a  (n) $n:expr) => {{
@@ -382,7 +399,7 @@ impl LR35902Cpu {
                 let val = self.load8(addr);
                 store!(a, val);
                 //println!("{} bytes: ld a (n) addr:{:#X}  ", $n, addr);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (ld (c)  a $n:expr) => {{
@@ -391,7 +408,7 @@ impl LR35902Cpu {
                 let addr = 0xFF00 + lo;
                 self.store8(addr, srcval);
                 //println!("{} bytes: ld (c) addr:{:#X} a ", $n, addr);
-                ($n as u8)
+                ($n as u8, 2)
             }};
 
             (ld a (c) $n:expr) => {{
@@ -400,7 +417,7 @@ impl LR35902Cpu {
                 let val = self.load8(addr);
                 store!(a, val);
                 //println!("{} bytes: ld a (c) addr:{:#X}", $n, addr);
-                ($n as u8)
+                ($n as u8, 2)
             }};
 
             (ld hl spn $n:expr) => {{
@@ -409,14 +426,17 @@ impl LR35902Cpu {
                 let val = spval.wrapping_add(lo); 
                 store!(hl, val);
                 //println!("{} bytes: ld hl spn ", $n);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (ld $dst:tt $src:tt $n:expr) => {{
                 let srcval = load!($src);
                 store!($dst, srcval);
+                let mut ldcycles = 1;
+                ldcycles += self.get_ld_cycles(stringify!($dst));
+                ldcycles += self.get_ld_cycles(stringify!($src));
                 //println!("{} bytes: ld {} = {:#X}", $n, stringify!($dst), srcval);
-                ($n as u8)
+                ($n as u8, ldcycles)
             }};
 
             (inc $opr:tt $n:expr) => {{
@@ -431,8 +451,15 @@ impl LR35902Cpu {
                     let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_add(1));
                 }
+
+                let inc_cycles = match stringify!($opr) {
+                    "bc"|"de"|"hl"|"sp" => 2,
+                    "b"|"d"|"h"|"c"|"e"|"l"|"a" => 1,
+                    "(hl)" => 3,
+                    _ => panic!("inc bad opr: {}", stringify!($opr)),
+                };
                 //println!("{} bytes: inc {}", $n, stringify!($opr));
-                ($n as u8)
+                ($n as u8, inc_cycles)
             }};
 
             (dec $opr:tt $n:expr) => {{
@@ -448,8 +475,15 @@ impl LR35902Cpu {
                     let val: u16 = prev_val as u16;
                     store!($opr, val.wrapping_sub(1));
                 } 
+
+                let dec_cycles = match stringify!($opr) {
+                    "bc"|"de"|"hl"|"sp" => 2,
+                    "b"|"d"|"h"|"c"|"e"|"l"|"a" => 1,
+                    "(hl)" => 3,
+                    _ => panic!("dec bad opr: {}", stringify!($opr)) 
+                };
                 //println!("{} bytes: dec {}", $n, stringify!($opr));
-                ($n as u8)
+                ($n as u8, dec_cycles)
             }};
 
             (add $dst:tt $src:tt $n:expr) => {{
@@ -459,6 +493,7 @@ impl LR35902Cpu {
 
                 self.regs.f.n = false;
 
+                let mut add_cycles = 1;
                 // from stackoverflow:
                 // overflow is when you add 2 numbers with the same sign but get a different sign
                 if stringify!($dst) == "a" {
@@ -466,22 +501,30 @@ impl LR35902Cpu {
                     self.regs.f.h = ((dstval as u8) ^ (srcval as u8) ^ (resultval as u8)) & 0x10 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
+                    if stringify!($src) == "(hl)" {
+                        add_cycles = 2;
+                    } else {
+                        add_cycles = 1;
+                    }
                 }  else if stringify!($dst) == "hl" {
                     // bit 12
                     self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
+                    add_cycles = 2;
                 } else if stringify!($dst) == "sp" {
                     // bit 4
                     self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x10 != 0;
                     // bit 8
                     self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x100 != 0;
                     self.regs.f.z = false;
+                    add_cycles = 4;
+
                 }
                 //println!("add resultval: {:#X}, srcval: {:#X}, dstval: {:#X}", resultval, srcval, dstval);
                 store!($dst, resultval);
                 //println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!($src));
-                ($n as u8)
+                ($n as u8, add_cycles)
             }};
 
 
@@ -490,8 +533,10 @@ impl LR35902Cpu {
                 let addr_offset = load!(s8);
                 let addr = self.regs.pc.wrapping_add(addr_offset as u16);
                 self.set_pc(addr);
-                println!("{} bytes: jr {:#X}", $n, addr);
-                ($n as u8)
+                //println!("{} bytes: jr {:#X}", $n, addr);
+
+                // TODO: Cycles is actually 3/2
+                ($n as u8, 2)
             }};
 
             (jr $op1:tt $op2:tt $n:expr) => {{
@@ -508,13 +553,15 @@ impl LR35902Cpu {
                 if condmet {
                     self.set_pc(self.regs.pc.wrapping_add(addr_offset));
                 }
-                println!("{} bytes: jr {}, {:#06X} (final: {:#06X})", $n, stringify!($op1), addr_offset, addr);
-                ($n as u8)
+                //println!("{} bytes: jr {}, {:#06X} (final: {:#06X})", $n, stringify!($op1), addr_offset, addr);
+
+                // TODO: Cycles is actually 3/2
+                ($n as u8, 2)
             }};
 
             (stop $n:expr) => {{
                 println!("{} bytes: stop", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             // rotate right,  carry into bit 7
@@ -525,7 +572,7 @@ impl LR35902Cpu {
                 aval = ((self.regs.f.c as u8) << 7) | aval;
                 store!(a, aval);
                 //println!("{} bytes: rra", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             // rotate left, carry into bit0
@@ -535,7 +582,7 @@ impl LR35902Cpu {
                 aval = (self.regs.f.c as u8) | aval;
                 store!(a, aval);
                 //println!("{} bytes: rla", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             // rotate left register a, bit7 into carry and bit0
@@ -547,7 +594,7 @@ impl LR35902Cpu {
                 store!(a, aval);
                 self.regs.c = bit7;
                 //println!("{} bytes: rlca", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
             // rotate right , bit 0 into carry and into bit7
             (rrca $n:expr)  => {{
@@ -558,7 +605,7 @@ impl LR35902Cpu {
                 store!(a, aval);
                 self.regs.c = bit0;
                 //println!("{} bytes: rrca", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             // one's complement of a 
@@ -570,7 +617,7 @@ impl LR35902Cpu {
                 self.regs.f.n = true;
                 self.regs.f.h = true;
                 //println!("{} bytes: cpl", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
             // adjust A register after an add or subtract to be valid BCD encoding?
             // see (https://forums.nesdev.org/viewtopic.php?t=15944)
@@ -607,7 +654,7 @@ impl LR35902Cpu {
                 self.regs.f.h = false;
                 store!(a, aval);
                 //println!("{} bytes: daa", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             (scf $n:expr) => {{
@@ -615,14 +662,14 @@ impl LR35902Cpu {
                 self.regs.f.n = false;
                 self.regs.f.h = false;
                 //println!("{} bytes: scf", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             (ccf $n:expr) => {{
                 // toggle carry flag?
                 self.regs.f.c = (self.regs.f.c as u8 ^ 0x1)  == 0x1;
                 //println!("{} bytes: ccf", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             // CB prefix 
@@ -632,7 +679,7 @@ impl LR35902Cpu {
 
             (halt $n:expr) => {{
                 //println!("{} bytes: halt", $n);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             (adc $dst:tt $src:tt $n:expr) => {{
@@ -645,8 +692,11 @@ impl LR35902Cpu {
                 self.regs.f.h = (result2 ^ dstval ^ srcval) & 0x10 != 0; 
                 self.regs.f.c = overflowed | overflowed2;
                 store!($dst, result2);
+
+                let adc_cycles = if stringify!($src) == "(hl)" || stringify!($src) == "n" { 2 } else { 1 };
+                
                 //println!("{} bytes: adc {}, {}", $n, stringify!($dst), stringify!($src));
-                ($n as u8)
+                ($n as u8, adc_cycles)
             }};
 
             (sub $opr:tt $n:expr) => {{
@@ -657,8 +707,9 @@ impl LR35902Cpu {
                 self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
                 self.regs.f.c = overflowed;
                 store!(a, result);
+                let sub_cycles = if stringify!($src) == "(hl)" { 2 } else { 1 };
                 //println!("{} bytes: sub {}", $n, stringify!($opr));
-                ($n as u8)
+                ($n as u8, sub_cycles)
             }};
 
             (sub $n:expr) => {{
@@ -670,16 +721,18 @@ impl LR35902Cpu {
                 self.regs.f.c = overflowed;
                 store!(a, result);
                 //println!("{} bytes: sub {:#04X}", $n, oprval);
-                ($n as u8)
+                let sub_cycles = if stringify!($src) == "n" { 2 } else { 1 };
+                ($n as u8, sub_cycles)
             }};
 
             (sbc $dst:tt $src:tt $n:expr) => {{
                 let dstval = load!($dst);
                 let srcval = load!($src);
-                let result = dstval - srcval - (self.regs.f.c as u8);
+                let result = dstval.wrapping_sub(srcval).wrapping_sub((self.regs.f.c as u8));
                 store!($dst, result);
                 //println!("{} bytes: sbc {}, {}", $n, stringify!($dst), stringify!($src));
-                ($n as u8)
+                let sub_cycles = if stringify!($src) == "(hl)" || stringify!($src) == "n" { 2 } else { 1 };
+                ($n as u8, sub_cycles)
             }};
 
             (and $opr:tt $n:expr) => {{
@@ -690,7 +743,8 @@ impl LR35902Cpu {
                 self.regs.f.h = true;
                 self.regs.f.c = false;
                 //println!("{} bytes: and {}", $n, stringify!($opr));
-                ($n as u8)
+                let and_cycles = if stringify!($opr) == "(hl)" || stringify!($opr) == "n" { 2 } else { 1 };
+                ($n as u8, and_cycles)
             }};
 
             (xor $opr:tt $n:expr) => {{
@@ -701,7 +755,8 @@ impl LR35902Cpu {
                 self.regs.f.h = false;
                 self.regs.f.c = false;
                 //println!("{} bytes: xor {}", $n, stringify!($opr));
-                ($n as u8)
+                let xor_cycles = if stringify!($opr) == "(hl)" || stringify!($opr) == "n" { 2 } else { 1 };
+                ($n as u8, xor_cycles)
             }};
 
             (or $opr:tt $n:expr) => {{
@@ -712,7 +767,8 @@ impl LR35902Cpu {
                 self.regs.f.h = false;
                 self.regs.f.c = false;
                 //println!("{} bytes: or {}", $n, stringify!($opr));
-                ($n as u8)
+                let or_cycles = if stringify!($opr) == "(hl)" || stringify!($opr) == "n" { 2 } else { 1 };
+                ($n as u8, or_cycles)
             }};
 
             (cp $opr:tt $n:expr) => {{
@@ -723,7 +779,7 @@ impl LR35902Cpu {
                 self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
                 self.regs.f.c = overflowed;
                 //println!("{} bytes: cp {}", $n, stringify!($opr));
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
             (reti $n:expr) => {{
@@ -736,7 +792,7 @@ impl LR35902Cpu {
                 // enable interrupt when returning form ISR via RETI
                 self.ime = true;
                 //println!("{} bytes: reti", $n);
-                ($n as u8)
+                ($n as u8, 4)
             }};
 
             (ret $n:expr) => {{
@@ -748,7 +804,9 @@ impl LR35902Cpu {
                 let ret_addr = (hi << 8) | lo;
                 self.set_pc(ret_addr);
                 //println!("{} bytes: ret", $n);
-                ($n as u8)
+
+                // TODO: Cycles actually 5/2
+                ($n as u8, 2)
             }};
             
             (ret $conds:ident $n:expr) => {{
@@ -769,7 +827,8 @@ impl LR35902Cpu {
                     self.set_pc(ret_addr);
                 }
                 //println!("{} bytes: ret {}", $n, condflags);
-                ($n as u8)
+                // TODO: cycles actually 5/2
+                ($n as u8, 2)
             }};
            
             (pop bc $n:expr) => {{
@@ -778,7 +837,7 @@ impl LR35902Cpu {
                 self.regs.set_bc( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
                 //println!("{} bytes: pop bc ", $n);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (pop de $n:expr) => {{
@@ -787,7 +846,7 @@ impl LR35902Cpu {
                 self.regs.set_de( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
                 //println!("{} bytes: pop de ", $n);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (pop hl $n:expr) => {{
@@ -796,7 +855,7 @@ impl LR35902Cpu {
                 self.regs.set_hl( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
                 //println!("{} bytes: pop hl ", $n);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (pop af $n:expr) => {{
@@ -805,7 +864,7 @@ impl LR35902Cpu {
                 self.regs.set_af( ((hi as u16) << 8) | lo as u16);
                 self.regs.sp += 2;
                 //println!("{} bytes: pop af ", $n);
-                ($n as u8)
+                ($n as u8, 3)
             }};
 
             (push $reg:tt $n:expr) => {{
@@ -815,14 +874,14 @@ impl LR35902Cpu {
                 self.regs.sp -= 1;
                 self.store8(self.regs.sp, (regval & 0xFF) as u8);
                 //println!("{} bytes: push {} ", $n, stringify!($reg));
-                ($n as u8)
+                ($n as u8, 4)
 
             }};
 
             (rst $opr:literal $n:expr) => {{
                 let  _rst_vector_num = $opr;
                 //println!("{} bytes: rst {}", $n, stringify!($opr));
-                ($n as u8)
+                ($n as u8, 4)
             }};
             
             (call $conds:ident nn $n:expr) => {{
@@ -842,7 +901,7 @@ impl LR35902Cpu {
                     self.set_pc(addr);
                 }
                 //println!("{} bytes: call {} {:x}", $n, condflags, addr);
-                ($n as u8)
+                ($n as u8, 4)
             }};
             
             (call nn $n:expr) => {{
@@ -854,14 +913,14 @@ impl LR35902Cpu {
                 self.store8(self.regs.sp, (self.regs.pc &0xFF) as u8);
                 self.set_pc(addr);
                 //println!("{} bytes: call nn (addr:{:#X})", $n, addr);
-                ($n as u8)
+                ($n as u8, 4)
             }};
              
              (jp nn $n:expr) => {{ 
                 let addr = load!(nn);
                 self.set_pc(addr);
                 //println!("{} bytes: jp nn:{:#06X}", $n, addr);
-                ($n as u8)
+                ($n as u8, 4)
              }};
 
              (jp $cond:ident nn $n:expr) => {{ 
@@ -878,14 +937,15 @@ impl LR35902Cpu {
                      self.set_pc(addr);
                  }
                  //println!("{} bytes: jp {} {:#06X}", $n, condflags, addr);
-                ($n as u8)
+                 // TODO: cycles actually 4/3
+                ($n as u8, 4)
              }};
 
              (jp hl $n:expr) => {{
                  let addr = self.regs.hl();
                  self.set_pc(addr);
                  //println!("{} bytes: jp hl {:x}", $n, addr);
-                 ($n as u8)
+                 ($n as u8, 1)
              }};
 
              (di $n:expr) => {{
@@ -893,7 +953,7 @@ impl LR35902Cpu {
                  self.ime = false;
                  self.prev_ime = false;
                  //println!("{} bytes: di", $n);
-                 ($n as u8)
+                 ($n as u8, 1)
              }}; 
              
              (ei $n:expr) => {{
@@ -901,12 +961,12 @@ impl LR35902Cpu {
                  // interrupt enable
                  self.ime = true;
                  //println!("{} bytes: ei", $n);
-                 ($n as u8)
+                 ($n as u8, 1)
              }}; 
 
             (TODO $n:expr) => {{
                 todo!("unknown opcode:{:x}", opc);
-                ($n as u8)
+                ($n as u8, 1)
             }};
 
 
@@ -1097,7 +1157,8 @@ impl LR35902Cpu {
                 let  opc_cb = self.fetch8();
                 match opc_cb {
                     $( ConstEval::<{$ix}>::VALUE => {
-                        gen_a_z80_cb_handler!($mne $opr $n)
+                        gen_a_z80_cb_handler!($mne $opr $n);
+                        (2, 2)
                     }, )*
                     _=> { panic!("problem!"); }
                 }
@@ -1297,9 +1358,9 @@ impl LR35902Cpu {
             }};
         }
 
-        let oplen = use_z80_table!(gen_z80_exec_handlers);
+        let (oplen, cycles) = use_z80_table!(gen_z80_exec_handlers);
         self.stats.num_instrs_executed += 1;
-        oplen
+        (oplen, cycles)
     }
 
     pub fn instructions_executed(&self) -> i32 {
@@ -1373,7 +1434,7 @@ fn test_disasm() {
 fn test_run_gb() {
     use crate::cpu::LR35902Cpu;
     use crate::rom::read_rom;
-    let rom = read_rom("cpu_instrs.gb").unwrap();
+    let rom = read_rom("rom/cpu_instrs.gb").unwrap();
     println!("rom size: {}", rom.len());
     println!("rom: {:?}", rom);
     let bus = Shared::new(Bus::new(&rom));
@@ -1382,7 +1443,7 @@ fn test_run_gb() {
     // Execute instructions (may hop around due to jumps/calls)
     const MAX_INSTRUCTIONS_TO_RUN : i32 = 99999999;
     while (cpu.pc() as i32) < (rom.len() as i32) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
-        cpu.exec_one_instruction() as usize;
+        cpu.exec_one_instruction();
         println!("CPU:");
         println!("{:?}", cpu);
     }
