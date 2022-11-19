@@ -246,9 +246,6 @@ pub struct CpuStatistics {
 pub struct LR35902Cpu {
     pub bus: Shared<Bus>,
     pub regs: Registers,
-    prev_ime: bool, // since EI instruction effect is delayed, we use prev_ime to actually test 
-                    // if interrupt processing should occur
-    ime: bool,     // interrupt enable flag
     stats: CpuStatistics,
 }
 
@@ -258,8 +255,6 @@ impl LR35902Cpu {
         let mut cpu = LR35902Cpu {
             bus,
             regs: Default::default(),
-            prev_ime: true,
-            ime: true,
             stats: Default::default()
         };
         cpu.regs.pc = start_pc;
@@ -355,6 +350,38 @@ impl LR35902Cpu {
 
 
     pub fn step(&mut self) -> u8 {
+        // check pending interrupts 
+        let prev_ime = self.bus.interrupts.prev_ime;
+
+        // roll the prior ime for the 1 cycle delay of EI instruction
+        self.bus.interrupts.prev_ime = self.bus.interrupts.ime;
+
+        // if interrupt enabled and we got a interrupt pending
+        if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
+            // get ISR address
+            let which_int = self.bus.interrupts.interrupt_flag.trailing_zeros();
+            let isr_addr = (0xFF40 as u16).wrapping_add(8*which_int as u16);
+            let pc = self.pc();
+
+            // push return address onto stack
+            self.regs.sp -= 1;
+            self.store8(self.regs.sp, (pc >> 8) as u8);
+            self.regs.sp -= 1;
+            self.store8(self.regs.sp, (pc & 0xFF) as u8);
+
+            // disable interrupt 
+            self.bus.interrupts.ime = false;
+            self.bus.interrupts.prev_ime = false;
+            // clear interrupt flag for the interrupt
+            self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
+
+            self.set_pc(isr_addr);
+            self.bus.tick(); 
+            self.bus.tick(); 
+            self.bus.tick(); 
+            // return so that we don't actually execute during this step.
+            return 4;
+        }
         let (_, cycles) = self.exec_one_instruction();
         self.bus.tick(); 
         cycles
@@ -790,8 +817,8 @@ impl LR35902Cpu {
                 let ret_addr = (hi << 8) | lo;
                 self.set_pc(ret_addr);
                 // enable interrupt when returning form ISR via RETI
-                self.ime = true;
-                //println!("{} bytes: reti", $n);
+                // also has 1 cycle delay
+                self.bus.interrupts.ime = true;
                 ($n as u8, 4)
             }};
 
@@ -950,8 +977,8 @@ impl LR35902Cpu {
 
              (di $n:expr) => {{
                  // NOTE: DI takes effect right away
-                 self.ime = false;
-                 self.prev_ime = false;
+                 self.bus.interrupts.ime = false;
+                 self.bus.interrupts.prev_ime = false;
                  //println!("{} bytes: di", $n);
                  ($n as u8, 1)
              }}; 
@@ -959,7 +986,7 @@ impl LR35902Cpu {
              (ei $n:expr) => {{
                  // NOTE: EI is delayed 1 instruction. we set ime but use prev_ime to test
                  // interrupt enable
-                 self.ime = true;
+                 self.bus.interrupts.ime = true;
                  //println!("{} bytes: ei", $n);
                  ($n as u8, 1)
              }}; 
@@ -1392,6 +1419,7 @@ impl std::fmt::Debug for LR35902Cpu {
 #[test]
 fn test_disasm() {
     use crate::cpu::LR35902Cpu;
+    use crate::bus::Interrupts;
     let code_buffer = [0x00, // nop
                        0x06, // ld b, n (0xff) 
                        0xff,
@@ -1409,13 +1437,14 @@ fn test_disasm() {
                        0x00,
                        0x00,
     ]; 
-    let bus = Shared::new(Bus::new(&code_buffer)); 
+    let interrupts = Shared::new(Interrupts::default());
+    let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone())); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
    
     // Disassemble.  simple view, does not show operand values
     while cpu.pc() < (code_buffer.len() as u16) {
         let opcode = cpu.load8(cpu.pc()); 
-        let (oplen, _) = cpu.disasm(opcode) as usize;
+        let (oplen, _) = cpu.disasm(opcode);
         cpu.set_pc(cpu.pc() + (oplen as u16));
     }
   
@@ -1423,21 +1452,24 @@ fn test_disasm() {
     const MAX_INSTRUCTIONS_TO_RUN : i32 = 20;
     cpu.set_pc(0); 
     while cpu.pc() < (code_buffer.len() as u16) && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
-        cpu.exec_one_instruction() as usize;
+        cpu.exec_one_instruction();
         println!("CPU:");
         println!("{:?}", cpu);
     }
 
 }
 
+#[ignore]
 #[test]
 fn test_run_gb() {
     use crate::cpu::LR35902Cpu;
     use crate::rom::read_rom;
+    use crate::bus::Interrupts;
     let rom = read_rom("rom/cpu_instrs.gb").unwrap();
     println!("rom size: {}", rom.len());
     println!("rom: {:?}", rom);
-    let bus = Shared::new(Bus::new(&rom));
+    let interrupts = Shared::new(Interrupts::default());
+    let bus = Shared::new(Bus::new(&rom, interrupts.clone()));
     let mut cpu = LR35902Cpu::new(0x100, bus.clone());
     println!("instructions executed: {}", cpu.instructions_executed());
     // Execute instructions (may hop around due to jumps/calls)
@@ -1457,3 +1489,64 @@ fn test_signext() {
     println!("u: {:#06X}", u);
 }
 
+#[test]
+fn test_interrupts() {
+    use crate::util::Shared;
+    use crate::bus::Interrupts;
+    use crate::cpu::LR35902Cpu;
+    
+    const MAX_INSTRUCTIONS_TO_RUN : i32 = 15;
+
+    let main_program = [0x00, // nop
+                       0x3E,    // ld a, n -- n = 0x0F
+                       0x0F,    //
+                       0xEA,    // ld (nn), a -- nn = 0xFFFF Interrupt Enable  
+                       0xFF,
+                       0xFF,
+                       0x3E,    // ld a, n -- n = 0xFF set 0xFF06 = 0xFE
+                       0xFE,    //
+                       0xEA,    // ld (nn), a -- nn = 0xFF06  TMA
+                       0x06,
+                       0xFF,
+                       0xFB,    // ei
+                       0x03,    // inc bc
+                       0x24,    // inc h
+                       0x24,    // inc h
+                       0x09,    // add hl, bc
+                       0x01,    // ld bc, nn (where nn = 0xbabe)
+                       0xbe,    // z80 is little endien so 0xbabe is 0xbe 0xba
+                       0xba,
+                       0x25,
+                       0xCB,    // rlc b 
+                       0x00,
+                       0xC3,    // jp 0x0000 ; go back to beginning
+                       0x00,
+                       0x00,
+    ]; 
+
+    let isr_FF40 = [
+                    0x03, // inc h
+                    0xD9, // RETI
+    ];
+
+    let mut code_buffer = vec![0u8; 0xFFFF];
+    code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
+    code_buffer[0xFF40..0xFF40 + 2].copy_from_slice(&isr_FF40[..]);
+
+    let interrupts = Shared::new(Interrupts::default());
+    let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone()));
+    let mut cpu = LR35902Cpu::new(0x0, bus.clone());
+    
+    while (((cpu.pc() as i32) < (main_program.len() as i32)) ||
+           ((cpu.pc() as u16) == 0xFF40) || 
+           ((cpu.pc() as u16) == 0xFF41)) 
+        && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
+        println!("CPU BEFORE:");
+        println!("{:?}", cpu);
+        cpu.step();
+        println!("CPU AFTER:");
+        println!("{:?}", cpu);
+    }
+
+
+}

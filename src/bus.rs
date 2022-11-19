@@ -1,17 +1,19 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-
+use crate::util::Shared;
 pub struct Bus {
     pub mem: Vec<u8>,
-    pub timer: Timer
+    pub timer: Timer,
+    pub interrupts: Shared<Interrupts>
 }
 
 
 impl Bus {
-    pub fn new(mem: &[u8])  -> Self {
+    pub fn new(mem: &[u8], interrupts: Shared<Interrupts>)  -> Self {
         let mut bus =     Bus {
             mem: vec![0x0; 0x20000],
-            timer: Default::default(),
+            timer: Timer::new(interrupts.clone()),
+            interrupts: interrupts.clone()
         };
         // note: when i did bus.copy_from_slice, got panic that source len != dest len
         // so had to transform dest into a slice first
@@ -21,7 +23,17 @@ impl Bus {
 
     pub fn read8(&self, addr: u16) -> u8 {
         // TODO: demultiplex addr to the varios IO ranges
-        self.mem[addr as usize]
+        match addr {
+            0xFF04..=0xFF07 => {
+                self.timer.read8(addr)
+            },
+            0xFFFF | 0xFF0F => {
+                self.interrupts.read8(addr)
+            },
+            _ => {
+                self.mem[addr as usize]
+            }
+        }
     }
 
     pub fn write8(&mut self, addr: u16, val: u8) {
@@ -30,6 +42,9 @@ impl Bus {
         match addr {
             0xFF04..=0xFF07 => {
                 self.timer.write8(addr, val);
+            },
+            0xFFFF | 0xFF0F => {
+                self.interrupts.write8(addr, val);
             },
             _ => {
                 self.mem[addr as usize] = val;
@@ -40,10 +55,31 @@ impl Bus {
     pub fn tick(&mut self) {
         self.timer.tick();
     }
+
+    // Display byte buffer 16-bit words. Currently used to display PC memory and STACK 
+    pub fn hexdump(&self, start_addr: u16, len: u16) -> String {
+        let mut output = String::new();
+        let words_per_line  = 4;
+        for i in 0..len/2 {
+            if i*2 + 1 > len {
+                break;
+            }
+            if i % words_per_line == 0 {
+                output = output + &format!("{:04X}:", start_addr.wrapping_add((i as u16)*2));
+            }
+            let word;
+            word = ((self.read8(start_addr.wrapping_add(2*i)) as u16) << 8) | (self.read8(start_addr.wrapping_add(2*i + 1)) as u16); 
+            output = output + &format!(" {:04X}", word);
+            if ((i+1) % words_per_line) == 0 {
+                output = output + "\n";
+            }
+        }
+        output
+    }
 }
 
 /* Timer Register.
- * GB master clock speed is 4194304 4.2 MHz
+ * GB master clock speed is 4194304 4.2 MHz 
  * This is the master clock. 
  */
 pub struct Timer {
@@ -86,22 +122,72 @@ pub struct Timer {
     pub prev_clock_overflow_bit: bool,
     pub tima_overflowed: bool,
     pub tima_reloaded: bool,
+
+
+    pub interrupts: Shared<Interrupts>,
 }
 
+pub struct Interrupts {
+    pub interrupt_enable_reg: u8,       // 0xFFFF  Interrupt Enable
+                                        // Bit Number               ISR Handler addresss 
+                                        // Bit 0 = VBlank           0x40 
+                                        // Bit 1 = LCD STACK        0x48
+                                        // Bit 2 = Timer            0x50
+                                        // Bit 3 = Serial           0x58
+                                        // Bit 4 = Joypad           0x60
 
-impl Default for Timer {
+    pub interrupt_flag: u8,             // 0xFF0F  Interrupt Flag
+                                        // Interrupt flag. Set for device when interrupt is
+                                        // requested. Interrupt actually only occurs if IME is
+                                        // enabled
+    
+    pub ime: bool,              // IME - Interrupt Enable. 
+                                // EI enables it, DI disables it
+                                // RETI enables it
+                                // ISR entry disables it
+
+    pub prev_ime: bool,         // Used to implement the EI 1 cycle delay
+}
+
+impl Default for Interrupts {
     fn default() -> Self {
-        Timer {
-            div: 0,
-            tima: 0,
-            tma: 0,
-            tac: 0,
-            prev_clock_overflow_bit: false,
-            tima_overflowed: false,
-            tima_reloaded: false,
+        Interrupts {
+            interrupt_enable_reg: 0x0,
+            interrupt_flag: 0x0,
+            ime: true,
+            prev_ime: true,
         }
     }
+}
+impl Interrupts {
+    const INT_TIMER: u8 = 2;
+    pub fn write8(&mut self, addr: u16, val: u8) {
+        match addr {
+            0xFFFF => {
+                self.interrupt_enable_reg = val;
+            },
+            0xFF0F => {
+                self.interrupt_flag = val;
+            }
+            _ => {
+                panic!("attempt to read unknown interrupt reg: {:04X}", addr);
+            }
+        };
+    }
 
+    pub fn read8(&self, addr: u16) -> u8 {
+        match addr {
+            0xFFFF => {
+                self.interrupt_enable_reg
+            },
+            0xFF0F => {
+                self.interrupt_flag
+            }
+            _ => {
+                panic!("attempt to read unknown interrupt reg: {:04X}", addr);
+            }
+        }
+    }
 }
 
 impl Timer {
@@ -110,22 +196,32 @@ impl Timer {
     // ticks of the timer. This is why we increment div by 4 every tick.
     const TIMER_TICK_PER_CPU_TICK: u16 = 4;
 
-    fn tick(&mut self) {
-       self.div = self.div.wrapping_add(Timer::TIMER_TICK_PER_CPU_TICK);
+    pub fn new(interrupts: Shared<Interrupts>) -> Self {
+        Timer {
+            div: 0,
+            tima: 0,
+            tma: 0,
+            tac: 1,
+            prev_clock_overflow_bit: false,
+            tima_overflowed: false,
+            tima_reloaded: false,
+            interrupts: interrupts.clone(),
+        }
+    }
+    fn tick(&mut self) { 
+        self.div = self.div.wrapping_add(Timer::TIMER_TICK_PER_CPU_TICK);
 
         self.tima_reloaded = false;
 
-       // From Pandocs. When TIMA overflows, it does not load TMA immediately, there is a cycle
-       // delay.  This handles that
-       if self.tima_overflowed {
-           // Now load TMA
+        // From Pandocs. When TIMA overflows, it does not load TMA immediately, there is a cycle
+        // delay.  This handles that
+        if self.tima_overflowed {
+            // Now load TMA
             self.tima = self.tma;
-
-            // TODO: set interrupt flag
-
-           self.tima_overflowed = false; 
-           self.tima_reloaded = true;
-       }
+            self.interrupts.interrupt_flag = self.interrupts.interrupt_flag | ((1 << Interrupts::INT_TIMER) as u8);
+            self.tima_overflowed = false; 
+            self.tima_reloaded = true;
+        }
 
        let clock_select = self.tac & 0x3;
        let clock_overflow_bits: u8 = [9, 3, 5, 7][clock_select as usize];
@@ -157,6 +253,8 @@ impl Timer {
                  * registers wont prevent the IF flag from being set or TIMA from 
                  * being reloaded.
                  */
+                
+                //Writing to TIMA will cancel TIMA resetting into TMA.
                 if self.tima_overflowed { 
                     self.tima_overflowed = false;
                 }
@@ -183,6 +281,26 @@ impl Timer {
             },
             _ => {
                 panic!("bad write to timer registers: {:4X}", addr);
+            }
+        }
+    }
+
+    pub fn read8(&self, addr: u16) -> u8 {
+        match addr {
+            0xFF04 => {
+                (self.div >> 8) as u8
+            },
+            0xFF05 => {
+                self.tima
+            },
+            0xFF06 => {
+                self.tma 
+            },
+            0xFF07 => {
+                self.tac
+            },
+            _ => {
+                panic!("unknown timer read8: {:04X}", addr);
             }
         }
     }

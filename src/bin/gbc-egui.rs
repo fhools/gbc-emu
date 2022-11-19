@@ -1,5 +1,5 @@
-use gbc_emu::cpu;
-use gbc_emu::bus;
+use gbc_emu::cpu::{self, LR35902Cpu};
+use gbc_emu::bus::{self, Bus, Interrupts};
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
 use eframe::egui;
@@ -9,20 +9,69 @@ struct GbcApp {
     cpu: cpu::LR35902Cpu,
     bus: Shared<bus::Bus>,
     run_continuous: bool,
+    addr_to_dump: String,
     cycles: u64,
 }
 
 impl GbcApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
+
+        let main_program = [0x00, // nop
+        0x31,                      // ld sp, nn  sp = 0xDFFF
+        0xFF,
+        0xDF,
+        0x3E,    // ld a, n -- n = 0x0F
+        0x0F,    //
+        0xEA,    // ld (nn), a -- nn = 0xFFFF Interrupt Enable  
+        0xFF,
+        0xFF,
+        0x3E,    // ld a, n -- n = 0xFF set 0xFF06 = 0xFE
+        0xFE,    //
+        0xEA,    // ld (nn), a -- nn = 0xFF06  TMA
+        0x06,
+        0xFF,
+        0x3E,    // ld a, n -- n = 0xFE set 0xFF05 = 0xFE
+        0xFE,    //
+        0xEA,    // ld (nn), a -- nn = 0xFF05  TMA
+        0x05,
+        0xFF,
+        0xFB,    // ei
+        0x03,    // inc bc
+        0x24,    // inc h
+        0x24,    // inc h
+        0x09,    // add hl, bc
+        0x01,    // ld bc, nn (where nn = 0xbabe)
+        0xbe,    // z80 is little endien so 0xbabe is 0xbe 0xba
+        0xba,
+        0x25,
+        0xCB,    // rlc b 
+        0x00,
+        0xC3,    // jp 0x0000 ; go back to beginning
+        0x00,
+        0x00,
+        ]; 
+
+        let isr_FF50 = [
+            0x03, // inc h
+            0xD9, // RETI
+        ];
+
+        let mut code_buffer = vec![0u8; 0xFFFF];
+        code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
+        code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
+
+        let interrupts = Shared::new(Interrupts::default());
+        let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone()));
+        let mut cpu = LR35902Cpu::new(0x0, bus.clone());
+    
         let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         println!("rom size: {}", rom.len());
-        let gbc_bus = Shared::new(bus::Bus::new(&rom));
-        let gbc_cpu = cpu::LR35902Cpu::new(0x100, gbc_bus.clone());
         GbcApp {
-            cpu: gbc_cpu,
-            bus: gbc_bus,
+            cpu: cpu,
+            bus: bus,
             run_continuous: false,
+            addr_to_dump: String::new(),
             cycles: 0
         }
     }
@@ -101,6 +150,11 @@ impl eframe::App for GbcApp {
             // Display CPU registers
             ui.label(format!("{:?}", self.cpu));
 
+            // Display IF, IME
+            ui.label(format!("IF: {:02X} IE: {:02X} IME:{}", 
+                             self.cpu.bus.read8(0xFF0F),
+                             self.cpu.bus.read8(0xFFfF),
+                             self.cpu.bus.interrupts.prev_ime));
             // Display 4 words of memory at PC address
             let pcbuf = &self.bus.mem[self.cpu.pc() as usize .. self.cpu.pc() as usize + 8];
             let pcbufoutput = hexdump(&pcbuf, self.cpu.pc(), false);
@@ -114,11 +168,20 @@ impl eframe::App for GbcApp {
             ui.label(&stackoutput); 
 
             // Display Timer Counter
-            ui.label(format!("TIMA: {:4X}", self.cpu.bus.timer.tima));
+            ui.label(format!("TIMA: {:4X}", self.cpu.bus.read8(0xFF05)));
 
             // Display current instruction disassembled. 
             ui.label(show_instr(self, self.cpu.pc()));
-           
+         
+            // If user entered a hex addresss, then display hex dump
+            ui.text_edit_singleline(&mut self.addr_to_dump);
+            if let Ok(addr) = u16::from_str_radix(&self.addr_to_dump, 16) {
+                let membufoutput = self.cpu.bus.hexdump(addr, 16);
+                ui.label("memory:");
+                ui.label(membufoutput);
+            }
+
+
             // If not in continous run mode, display step button
             ui.add_enabled_ui(!self.run_continuous, |ui| {
                 // Execute one instruction on step clicked
