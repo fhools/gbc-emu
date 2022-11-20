@@ -6,8 +6,8 @@ author = "fhools"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]
-name = "gbc-emu-cli"
-path = "src/bin/main.rs"
+name="gbc-emu-framebuffer-test"
+path = "src/bin/gbc-framebuffer-test.rs"
 
 [[bin]]
 name="gbc-emu-egui"

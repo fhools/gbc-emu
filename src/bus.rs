@@ -56,7 +56,10 @@ impl Bus {
         self.timer.tick();
     }
 
-    // Display byte buffer 16-bit words. Currently used to display PC memory and STACK 
+    // Display memory address. All addresses go through the BUS
+    // NOTE: If we later change bus to tick on a read or write then we'll need 
+    // to update this routine and access bus via anotiher method that does
+    // not cause cycle ticks.
     pub fn hexdump(&self, start_addr: u16, len: u16) -> String {
         let mut output = String::new();
         let words_per_line  = 4;
