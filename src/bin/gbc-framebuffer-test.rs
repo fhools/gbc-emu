@@ -32,21 +32,41 @@ impl Default for MyApp {
     }
 }
 trait MyView {
+    const WIDTH: f32;
+    const HEIGHT: f32;
     fn screen_ui(&mut self, ui: &mut egui::Ui); 
 }
 
 impl MyView for MyApp {
+    const WIDTH: f32 = 320.0;
+    const HEIGHT: f32 = 240.0;
     fn screen_ui(&mut self, ui: &mut egui::Ui) {
-        ui.label("My screen label");
-        let rect = Rect::from_min_max([0.0,0.0].into(), [1.0, 1.0].into());
-        let (response, painter) = ui.allocate_painter(Vec2::new(ui.available_width(), ui.available_height()), Sense::hover());
+        ui.label(format!("window size: width: {}, height: {}", Self::WIDTH, Self::HEIGHT));
+        // allocate space in the child window
+        let (response, painter) = ui.allocate_painter(Vec2::new(Self::WIDTH, Self::HEIGHT), Sense::hover());
+        let Vec2{x: width, y: height} = response.rect.size();
+        let colors = [color::Color32::RED, color::Color32::YELLOW, color::Color32::DARK_GREEN, color::Color32::BLACK,
+                      color::Color32::GOLD, color::Color32::BLUE];
+
+        // create a transform to go from local space to global window space
         let to_screen = emath::RectTransform::from_to(
             Rect::from_min_size(Pos2::ZERO, response.rect.size()),
             response.rect,
-        );
-        painter.add(egui::Shape::rect_filled(to_screen.transform_rect(rect), 0.0, color::Color32::RED));
+            );
+
+        // output all the pixels, i'm using rects because i dont know any better way. seems kludgy
+        for i in 0..(width as i32) {
+            for j in 0..(height as i32) {
+                let rect = Rect::from_min_max([i as f32, j as f32].into(), [(i+1) as f32, (j+1) as f32].into());
+                painter.add(egui::Shape::rect_filled(to_screen.transform_rect(rect), 
+                                                     0.0, 
+                                                     colors[((i as usize + j as usize) % colors.len()) as usize]));
+            }
+        }
     }
 }
+
+
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
