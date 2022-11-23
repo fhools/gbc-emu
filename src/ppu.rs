@@ -35,27 +35,38 @@ pub enum PpuMode {
 
 pub struct Ppu {
     // Registers
-    scy: u8,             // 0xFF42 SCY Viewport Y Position 
-    scx: u8,             // 0xFF43 SCX Viewport X Position
-    ly: u8,              // 0xFF44 LY current line being drawn. 0 - 143 is screen. 144-153 is VBLANK
-                         // period. 
-    lyc: u8,             // 0xFF45 LYC. When LY is equal to LYC then the associated bit in LCD STAT
-                         // register is set. And LCD STAT interrupt is raised.
-    wy: u8,              // 0xFF4A WY Window Y position
-    wx: u8,              // 0xFF4B WX Window X position. WX should be 7. Values 0 and 166
-                         // unreliable. See Pan Docs
+    pub lcdc: u8,                // 0xFF30 LCD Control
+                            //      Bit 7 - LCD and PPU enable
+                            //      Bit 6 - Window tile map area. 0 = 9800 - 9BFF , 1 = 9C00 - 9FFF
+                            //      Bit 5 - Window enabe
+                            //      Bit 4 - BG and Window Tile Data 0 = 8800- 97FF, 1 = 8000 -8FFFF
+                            //      Bit 3 - BG Tile Map Area  0 = 9800 - 9BFF, 1 = 9C000 - 9FFFF
+                            //      Bit 2 - OBJ Size 0 = 8x8, 1=8x16
+                            //      Bit 1 - OBJ enable 
+                            //      Bit 0 - BG and enable priority
 
-    tile_map: [u8; 0x800], // There are 2 tile map areas, 0x9800 - 9BFF, and 0x9C00 - 9FFFF
-    tile_data: [u8; 0x1800], // 0x8000 - 0x9800 Tile Data memory
+    pub scy: u8,                // 0xFF42 SCY Viewport Y Position 
+    pub scx: u8,                // 0xFF43 SCX Viewport X Position
+    pub ly: u8,                 // 0xFF44 LY current line being drawn. 0 - 143 is screen. 144-153 is VBLANK
+                            // period. 
+    pub lyc: u8,                // 0xFF45 LYC. When LY is equal to LYC then the associated bit in LCD STAT
+                            // register is set. And LCD STAT interrupt is raised.
+    pub wy: u8,                 // 0xFF4A WY Window Y position
+    pub wx: u8,                 // 0xFF4B WX Window X position. WX should be 7. Values 0 and 166
+                            // unreliable. See Pan Docs
+
+    pub tile_map: [u8; 0x800], // There are 2 tile map areas, 0x9800 - 9BFF, and 0x9C00 - 9FFFF
+    pub tile_data: [u8; 0x1800], // 0x8000 - 0x9800 Tile Data memory
 
     // Implementation details
-    interrupts: Shared<Interrupts>,
-    lx: u64,        // Current dot for a line. There are 456 dots  in a scanline 
-                    //
-    mode: PpuMode,       // Mode 0 = HBlank, 1 = VBlank, 2 = Search OAM, 3 = Transfer
+    pub interrupts: Shared<Interrupts>,
+    pub lx: u64,        // Current dot for a line. There are 456 dots  in a scanline 
+    pub lwy: u64,       // Current renderered window y
+                    
+    pub mode: PpuMode,       // Mode 0 = HBlank, 1 = VBlank, 2 = Search OAM, 3 = Transfer
                          //
                          
-    line_buffer: Vec<u8>, // The current line we are rendering
+    pub line_buffer: Vec<u8>, // The current line we are rendering
 }
 
 
@@ -63,6 +74,7 @@ impl Ppu {
 
     pub fn new(interrupts: Shared<Interrupts>) -> Ppu {
        Ppu {
+           lcdc: 0,
            scy: 0,
            scx: 0,
            ly: 0,
@@ -71,6 +83,7 @@ impl Ppu {
            wx: 0,
            interrupts: interrupts.clone(),
            lx: 0,
+           lwy: 0,
            mode: PpuMode::SearchOAM,
            line_buffer: vec![0;  SCREEN_WIDTH_PX as usize],
            tile_map: [0; 0x800],
@@ -82,8 +95,7 @@ impl Ppu {
         // This is called during the transfer mode, i.e. we are rendering a line 
         
         // Clear our line buffer
-        self.line_buffer.clear();
-
+        self.line_buffer.fill(0u8);
 
         // Render the bg or window
         self.do_transfer_of_bg_or_window();
@@ -95,54 +107,98 @@ impl Ppu {
 
     pub fn do_transfer_of_bg_or_window(&mut self) {
 
-        // TODO: This should actually be in a loop, this is just to flesh out the algorithm
-        //
         // Loop through all the pixels in the current line from 0 to SCREEN_WIDTH_PX
-        let scr_x = 100;
-        let scr_y = 80;
-        // Figure out the x and y coordinates of the current dot index
-        // This will take into account the current SCX and SCY
-        // If we are inside of the window portion then we will display the window tile map
-        // otherwise we only display the bg tilemap
-        //
-        // From the x and y coordinate.
-        // Find the tilemap that we are currently on
-        let tile_map_x = scr_x / PX_PER_TILE; 
-        let tile_map_y = scr_y / PX_PER_TILE;
-        // Find the offset within the tilemap 
-        let tile_offset_x = (scr_x % PX_PER_TILE) as usize;
-        let tile_offset_y = (scr_y % PX_PER_TILE) as usize;
+        for x in 0u64..(SCREEN_WIDTH_PX as u64) {
+            // Are we in the window range?
+            let is_in_window_range = x + 7 >= (self.wx as u64) && self.ly >= self.wy;
+
+            // Figure out the x and y coordinates of the current dot index
+            // This will take into account the current SCX and SCY, if we are in the window
+            // then don't use scx, use 7 + wx
+            let scr_x = 
+                if self.is_window_enabled() && is_in_window_range {
+                    (x + 7 - (self.wx as u64)) as u64
+                } else {
+                    x + (self.scx as u64)
+                };
+            let scr_y: u64 = 
+                if self.is_window_enabled() && is_in_window_range {
+                    let render_window_y = self.lwy;
+                    self.lwy += 1;
+                    render_window_y
+            } else {
+                (self.ly.wrapping_add(self.scy)) as u64
+            };
+            // If we are inside of the window portion then we will display the window tile map
+            // otherwise we only display the bg tilemap
+             
+            // From the x and y coordinate.
+            // Find the tilemap that we are currently on
+            let tile_map_x = scr_x / PX_PER_TILE; 
+            let tile_map_y = scr_y / PX_PER_TILE;
+            // Find the offset within the tilemap 
+            let tile_offset_x = (scr_x % PX_PER_TILE) as usize;
+            let tile_offset_y = (scr_y % PX_PER_TILE) as usize;
 
 
-        // From the tile map x and tile map y, find the index for the tile data
-        let tile_data_index = tile_map_x + tile_map_y * TILE_MAP_WIDTH;
+            // From the tile map x and tile map y, find the index for the tile data
+            let mut tile_data_index = tile_map_x + tile_map_y * TILE_MAP_WIDTH;
 
-        // From the tile data index, find the tile data for this x and y
-        let tile_data_id: usize = self.tile_map[tile_data_index as usize] as usize;
+            // Adjust the tile map index based whether we are at the window area 
+            // or bg area, and whether or not the window tile map area control bit 
+            // or bg tile map area control bit is set
+            tile_data_index += 
+                if self.is_window_enabled() {
+                    if self.is_window_tile_map_set() {
+                        0x400
+                    } else {
+                        0x0
+                    }
+                } else {
+                    if self.is_bg_tile_map_set() {
+                        0x400
+                    } else {
+                        0x0
+                    }
+                };
+
+            // Handle 
+            // From the tile data index, find the tile data for this x and y
+            let tile_data_id: usize = self.tile_map[tile_data_index as usize] as usize;
 
 
-        // From the tile data id, find the offset into the tile data memory. Each tile is 16 bytes
-        // TODO: we need to address tile_data_offset based on LCDC Bit 4.
-        let tile_data_offset: usize  = tile_data_id * BYTES_PER_TILE as usize;
-
-        // Pluck correct 2 bits from the tilemap 
-        // Each tile has 2 bytes per line, where the first byte is the lsbits, 
-        // and second byte is the msbits
+            // From the tile data id, find the offset into the tile data memory. Each tile is 16 bytes
+            let mut tile_data_offset: usize  = tile_data_id * BYTES_PER_TILE as usize;
 
 
-        // We extract the 2 bytes for the correct line from tile_data_offset
-        let tile_lsbits = self.tile_data[tile_data_offset  + tile_offset_y*2 as usize]; 
-        let tile_msbits = self.tile_data[tile_data_offset + tile_offset_y*2 + 1 as usize];
+            // Adjust the tile_data_offset based on whether we are at the window area or bg area,
+            // and whether or not the window tile data control bit or bg tile data control bit is
+            // set
+            tile_data_offset += 
+                if self.is_bg_tile_data_set() {
+                    0x0
+                } else {
+                    0x1000
+                };
+            if tile_data_offset >= 0x1800 {
+                tile_data_offset -= 0x1000;
+            }
 
-        // We use the offset x to determine which bits to combine together to get the color index
-        let color_bits = 
-            (tile_lsbits >> (7 - tile_offset_x)) & 1 |         // lower bit
-            (((tile_msbits >> (7 - tile_offset_x)) & 1) << 1);   // upper bit
+            // Pluck correct 2 bits from the tilemap 
+            // We extract the 2 bytes for the correct line from tile_data_offset
+            let tile_lsbits = self.tile_data[tile_data_offset  + tile_offset_y*2 as usize]; 
+            let tile_msbits = self.tile_data[tile_data_offset + tile_offset_y*2 + 1 as usize];
 
-        // From the color index we go into our palette and find the actual color
-        let color = self.from_color_to_color_byte(color_bits);
-        self.line_buffer[scr_x as usize] = color;
-        
+            // We use the offset x to determine which  2 bits to combine together to get the color index
+            let color_bits = 
+                (tile_lsbits >> (7 - tile_offset_x)) & 1 |         // lower bit
+                (((tile_msbits >> (7 - tile_offset_x)) & 1) << 1);   // upper bit
+
+            // From the color index we go into our palette and find the actual color
+            let color = self.from_color_to_color_byte(color_bits);
+            self.line_buffer[scr_x as usize] = color;
+        }
+
     }
 
     pub fn do_transfer_of_sprites(&mut self) {
@@ -153,6 +209,28 @@ impl Ppu {
         // TODO: actually do some kind of palette look up
         color_bits
     }
+
+
+    pub fn is_ppu_enabled(&self) -> bool {
+        (self.lcdc >> 7) & 1 == 1
+    }
+
+    pub fn is_window_enabled(&self) -> bool {
+        (self.lcdc >> 5) & 1 == 1
+    }
+
+    pub fn is_window_tile_map_set(&self) -> bool {
+        (self.lcdc >> 6) & 1 == 1
+    }
+
+    pub fn is_bg_tile_map_set(&self) -> bool {
+        (self.lcdc >> 3) & 1 == 1
+    }
+
+    pub fn is_bg_tile_data_set(&self) -> bool {
+        (self.lcdc >> 4) & 1 == 1
+    }
+
     pub fn tick(&mut self) {
         self.lx += 1;
         // DOTS_PER_LINE is not the same as screen pixels per line
@@ -161,6 +239,7 @@ impl Ppu {
             self.ly += 1;
             if self.ly == LINES_PER_FRAME {
                 self.ly = 0;
+                self.lwy = 0;
                 // The frame is done
             }
         }
@@ -172,7 +251,7 @@ impl Ppu {
                 }
             } else if self.lx < TRANSFER_OAM_DOT_END {
                 if self.set_mode(PpuMode::Transfer) {
-                   // Draw the line
+                    self.do_transfer_of_line();
                 }
             } else {
                if self.set_mode(PpuMode::HBlank) {
@@ -193,4 +272,20 @@ impl Ppu {
         self.mode = new_mode;        
         true
     }
+}
+
+
+#[test]
+fn test_ppu() {
+    use crate::ppu::Ppu;
+    use crate::util::Shared;
+    use crate::bus::Interrupts;
+    let interrupts = Shared::new(Interrupts::default());
+    let mut ppu = Ppu::new(interrupts.clone());
+
+    for _ in 0..DOTS_PER_LINE {
+        ppu.tick();
+    }
+
+
 }

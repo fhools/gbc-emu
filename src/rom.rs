@@ -38,7 +38,7 @@ pub fn read_rom<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
     }
 }
 
-
+#[ignore]
 #[test]
 fn test_read_rom() {
     let a = read_rom("test.fs");

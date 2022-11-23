@@ -1,28 +1,28 @@
-use std::rc::Rc;
-use std::cell::RefCell;
 use crate::util::Shared;
+use crate::ppu::Ppu;
 pub struct Bus {
-    pub mem: Vec<u8>,
+    pub mem: Shared<Vec<u8>>,
     pub timer: Timer,
-    pub interrupts: Shared<Interrupts>
+    pub interrupts: Shared<Interrupts>,
+    pub ppu: Shared<Ppu>
 }
 
 
 impl Bus {
-    pub fn new(mem: &[u8], interrupts: Shared<Interrupts>)  -> Self {
+    pub fn new(initial_mem: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
         let mut bus =     Bus {
-            mem: vec![0x0; 0x20000],
+            mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
-            interrupts: interrupts.clone()
+            interrupts: interrupts.clone(),
+            ppu: ppu.clone(),
         };
         // note: when i did bus.copy_from_slice, got panic that source len != dest len
         // so had to transform dest into a slice first
-        bus.mem[0..mem.len()].copy_from_slice(&Vec::from(mem)[..]);
+        bus.mem[0..initial_mem.len()].copy_from_slice(&Vec::from(initial_mem)[..]);
         bus
     }
 
     pub fn read8(&self, addr: u16) -> u8 {
-        // TODO: demultiplex addr to the varios IO ranges
         match addr {
             0xFF04..=0xFF07 => {
                 self.timer.read8(addr)
@@ -30,6 +30,8 @@ impl Bus {
             0xFFFF | 0xFF0F => {
                 self.interrupts.read8(addr)
             },
+            // TODO: Ppu VRAM
+
             _ => {
                 self.mem[addr as usize]
             }
@@ -37,8 +39,6 @@ impl Bus {
     }
 
     pub fn write8(&mut self, addr: u16, val: u8) {
-        // TODO: demmultiplexeer addr to various IO ranges
-
         match addr {
             0xFF04..=0xFF07 => {
                 self.timer.write8(addr, val);
@@ -54,6 +54,11 @@ impl Bus {
 
     pub fn tick(&mut self) {
         self.timer.tick();
+
+        // Ppu runs 4 clock cycle for every cpu clock cycles
+        for _ in 0..4 {
+            self.ppu.tick();
+        }
     }
 
     // Display memory address. All addresses go through the BUS

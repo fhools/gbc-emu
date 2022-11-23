@@ -1,5 +1,6 @@
 use gbc_emu::cpu::{self, LR35902Cpu};
 use gbc_emu::bus::{self, Bus, Interrupts};
+use gbc_emu::ppu::Ppu;
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
 use eframe::egui;
@@ -61,9 +62,11 @@ impl GbcApp {
         code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
         code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
+        let mem = Shared::new(vec![0u8; 0x10000]);
         let interrupts = Shared::new(Interrupts::default());
-        let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone()));
-        let mut cpu = LR35902Cpu::new(0x0, bus.clone());
+        let ppu = Shared::new(Ppu::new(interrupts.clone()));
+        let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
+        let cpu = LR35902Cpu::new(0x0, bus.clone());
     
         let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         println!("rom size: {}", rom.len());

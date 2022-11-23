@@ -1420,6 +1420,7 @@ impl std::fmt::Debug for LR35902Cpu {
 fn test_disasm() {
     use crate::cpu::LR35902Cpu;
     use crate::bus::Interrupts;
+    use crate::ppu::Ppu;
     let code_buffer = [0x00, // nop
                        0x06, // ld b, n (0xff) 
                        0xff,
@@ -1438,7 +1439,9 @@ fn test_disasm() {
                        0x00,
     ]; 
     let interrupts = Shared::new(Interrupts::default());
-    let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone())); 
+    let mem = Shared::new(vec![0u8; 0x10000]);
+    let ppu = Shared::new(Ppu::new(interrupts.clone()));
+    let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone())); 
     let mut cpu = LR35902Cpu::new(0, bus.clone());
    
     // Disassemble.  simple view, does not show operand values
@@ -1465,11 +1468,14 @@ fn test_run_gb() {
     use crate::cpu::LR35902Cpu;
     use crate::rom::read_rom;
     use crate::bus::Interrupts;
+    use crate::ppu::Ppu;
     let rom = read_rom("rom/cpu_instrs.gb").unwrap();
     println!("rom size: {}", rom.len());
     println!("rom: {:?}", rom);
     let interrupts = Shared::new(Interrupts::default());
-    let bus = Shared::new(Bus::new(&rom, interrupts.clone()));
+    let mem = Shared::new(vec![0u8; 0x10000]);
+    let ppu = Shared::new(Ppu::new(interrupts.clone()));
+    let bus = Shared::new(Bus::new(&rom, mem.clone(), interrupts.clone(), ppu.clone())); 
     let mut cpu = LR35902Cpu::new(0x100, bus.clone());
     println!("instructions executed: {}", cpu.instructions_executed());
     // Execute instructions (may hop around due to jumps/calls)
@@ -1481,6 +1487,7 @@ fn test_run_gb() {
     }
 }
 
+#[ignore]
 #[test]
 fn test_signext() {
     // Just testing that sign extension can work for i8 to u16
@@ -1489,10 +1496,12 @@ fn test_signext() {
     println!("u: {:#06X}", u);
 }
 
+#[ignore]
 #[test]
 fn test_interrupts() {
     use crate::util::Shared;
     use crate::bus::Interrupts;
+    use crate::ppu::Ppu;
     use crate::cpu::LR35902Cpu;
     
     const MAX_INSTRUCTIONS_TO_RUN : i32 = 15;
@@ -1534,7 +1543,9 @@ fn test_interrupts() {
     code_buffer[0xFF40..0xFF40 + 2].copy_from_slice(&isr_FF40[..]);
 
     let interrupts = Shared::new(Interrupts::default());
-    let bus = Shared::new(Bus::new(&code_buffer, interrupts.clone()));
+    let mem = Shared::new(vec![0u8; 0x10000]);
+    let ppu = Shared::new(Ppu::new(interrupts.clone()));
+    let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone())); 
     let mut cpu = LR35902Cpu::new(0x0, bus.clone());
     
     while (((cpu.pc() as i32) < (main_program.len() as i32)) ||
