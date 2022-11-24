@@ -99,7 +99,7 @@ impl Ppu {
 
         // Render the bg or window
         self.do_transfer_of_bg_or_window();
-
+        println!("line_buffer: {:?}", self.line_buffer);
         // Render the sprite layer
         self.do_transfer_of_sprites();
 
@@ -161,11 +161,11 @@ impl Ppu {
                         0x0
                     }
                 };
-
+            //println!("scr_x: {}, scr_y: {}, tile_data_index: {}", scr_x, scr_y, tile_data_index);
             // Handle 
             // From the tile data index, find the tile data for this x and y
             let tile_data_id: usize = self.tile_map[tile_data_index as usize] as usize;
-
+            //println!("tile_data_id: {}", tile_data_id);
 
             // From the tile data id, find the offset into the tile data memory. Each tile is 16 bytes
             let mut tile_data_offset: usize  = tile_data_id * BYTES_PER_TILE as usize;
@@ -283,9 +283,54 @@ fn test_ppu() {
     let interrupts = Shared::new(Interrupts::default());
     let mut ppu = Ppu::new(interrupts.clone());
 
+    // fill bg tile data set with some tiles. Lets make the tile the following:
+    // 0 1 2 3 0 1 2 3            Byte 0 and Byte 1         lsbits 01010101 msbits: 00110011
+    // 1 2 3 0 1 2 3 0            Byte 2 and Byte 3         lsbits 10101010 msbits: 01100110
+    // 2 3 0 1 2 3 0 1            Byte 4 and Byte 5         lsbits 01010101 msbits: 11001100
+    // 3 0 1 2 3 0 1 2            Byte 6 and Byte 7         lsbits 10101010 msbits: 10011001
+    // 0 1 2 3 0 1 2 3            Byte 8 and Byte 9         lsbits 01010101 msbits: 00110011 
+    // 1 2 3 0 1 2 3 0            Byte 10 and Byte 11       lsbits 10101010 msbits: 01100110
+    // 2 3 0 1 2 3 0 1            Byte 12 and Byte 13       lsbits 01010101 msbits: 11001100
+    // 2 3 0 1 2 3 0 1            Byte 14 and Byte 15       lsbits 10101010 msbits: 10011001
+    //
+    // The above works out to tile data:
+    // 0x55 0x33 0xAA 0x66 0x55 0xCC 0xAA 0x99 0x55 0x33 0xAA 0x66 0x55 0xCC 0xAA 0x99
+
+    let tile: Vec<u8>= vec![0x55, 0x33, 
+                    0xAA, 0x66,
+    0x55, 0xCC,
+    0xAA, 0x99,
+    0x55, 0x33,
+    0xAA, 0x66,
+    0x55, 0xCC,
+    0xAA, 0x99];
+
+    // 20 tiles across 
+    let many_tiles = &(&tile)
+        .into_iter()
+        .cycle()
+        .take(16*20).cloned()
+        .collect::<Vec<u8>>();
+    ppu.tile_data[0..16].copy_from_slice(&tile[..]);
+    //ppu.tile_data[0..16*20].copy_from_slice(&many_tiles[..]);
+
+
+    // Set lcdc bit 4 so we use the normal tile_data 
+    ppu.lcdc = 0x10;
     for _ in 0..DOTS_PER_LINE {
         ppu.tick();
     }
 
+    for _ in 0..DOTS_PER_LINE {
+        ppu.tick();
+    }
+
+    for _ in 0..DOTS_PER_LINE {
+        ppu.tick();
+    }
+
+    for _ in 0..DOTS_PER_LINE {
+        ppu.tick();
+    }
 
 }
