@@ -3,6 +3,7 @@ use gbc_emu::bus::{self, Bus, Interrupts};
 use gbc_emu::ppu::Ppu;
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
+use gbc_emu::bootrom::BOOT_ROM;
 use eframe::egui;
 use std::time::Duration;
 
@@ -18,6 +19,8 @@ impl GbcApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
+
+        // Setup a small program to test interrupts
         let main_program = [0x00, // nop
         0x31,                      // ld sp, nn  sp = 0xDFFF
         0xFF,
@@ -53,6 +56,7 @@ impl GbcApp {
         0x00,
         ]; 
 
+        // The timer ISR to run
         let isr_FF50 = [
             0x03, // inc h
             0xD9, // RETI
@@ -62,14 +66,19 @@ impl GbcApp {
         code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
         code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
+        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        println!("rom size: {}", rom.len());
+
         let mem = Shared::new(vec![0u8; 0x10000]);
         let interrupts = Shared::new(Interrupts::default());
         let ppu = Shared::new(Ppu::new(interrupts.clone()));
-        let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
+        //let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
+        let bus = Shared::new(Bus::new(&rom, &BOOT_ROM, mem.clone(), interrupts.clone(), ppu.clone()));
+        // For ISR test program starts at 0x0
+        //let cpu = LR35902Cpu::new(0x0, bus.clone());
+
         let cpu = LR35902Cpu::new(0x0, bus.clone());
     
-        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
-        println!("rom size: {}", rom.len());
         GbcApp {
             cpu: cpu,
             bus: bus,
@@ -85,23 +94,20 @@ fn hexdump(buf: &[u8], start_addr: u16, as_words: bool) -> String {
     let mut output = String::new();
     let num_word16 = 16;
     let words_per_line  = 4;
-    for i in 0..num_word16{
-        if i*2 + 1 > buf.len() {
-            break;
+    let mut i = 0;
+    while i < buf.len()  && i < num_word16*2 {
+
+        if i % (words_per_line*2) == 0 {
+            output = output + &format!("{:04X}:", start_addr + (i as u16));
         }
-        if i % words_per_line == 0 {
-            output = output + &format!("{:04X}:", start_addr + (i as u16)*2);
+        if i % 2 == 0 {
+            output = output + " ";
         }
-        let word;
-        if as_words {
-            word = ((buf[i+1] as u16) << 8) | (buf[i] as u16); 
-        } else {
-            word = ((buf[i] as u16) << 8) | (buf[i+1] as u16); 
-        }
-        output = output + &format!(" {:04X}", word);
-        if ((i+1) % words_per_line) == 0 {
+        output = output + &format!("{:02X}", buf[i]);
+        if ((i+1) % (words_per_line*2)) == 0 {
             output = output + "\n";
         }
+        i += 1;
     }
     output
 }
@@ -166,7 +172,8 @@ impl eframe::App for GbcApp {
 
             // Display stack memory
             ui.label("stack memory:");
-            let stackbuf = &self.bus.mem[self.cpu.regs.sp as usize .. self.cpu.regs.sp as usize + 16*2+1];
+            let stack_end = if self.cpu.regs.sp as usize + 16*2+1 > 0xFFFF { 0xFFFF} else { self.cpu.regs.sp as usize + 16*2+1 };
+            let stackbuf = &self.bus.mem[self.cpu.regs.sp as usize .. stack_end];
             let stackoutput = hexdump(&stackbuf, self.cpu.regs.sp, true);
             ui.label(&stackoutput); 
 
@@ -202,6 +209,7 @@ impl eframe::App for GbcApp {
                 let mut cycles_accum: u64= 0;
 
                 if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
+                    // get time before 
                     // there are 17476 cpu ticks  in a frame of 60 FPS
                     while cycles_accum < 17476 {
                         // compute cycle delta
@@ -220,12 +228,15 @@ impl eframe::App for GbcApp {
                         };
                         cycles_accum = cycles_accum.wrapping_add(delta as u64); 
                     }
-                    
+                   
+                    // get time after gb
+
+
                     // sleep for 1/60 of a sec
                     // TODO: magic number
                     let time_per_frame_in_micro =  1.0/(60 as f32) * 1_000_000.0;
                     let frame_time = Duration::from_micros(time_per_frame_in_micro as u64);
-                    std::thread::sleep(frame_time);
+                    //std::thread::sleep(frame_time);
                 }
                 // Must call request_repaint() otherwise update() won't be triggered unless GUI event
                 // happens

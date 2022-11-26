@@ -4,3 +4,4 @@ pub mod cpu;
 pub mod util;
 pub mod bus;
 pub mod ppu;
+pub mod bootrom;

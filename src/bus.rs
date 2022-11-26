@@ -9,7 +9,7 @@ pub struct Bus {
 
 
 impl Bus {
-    pub fn new(initial_mem: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+    pub fn new(initial_mem: &[u8], boot_rom: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
         let mut bus =     Bus {
             mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
@@ -19,18 +19,33 @@ impl Bus {
         // note: when i did bus.copy_from_slice, got panic that source len != dest len
         // so had to transform dest into a slice first
         bus.mem[0..initial_mem.len()].copy_from_slice(&Vec::from(initial_mem)[..]);
+        bus.mem[0..256].copy_from_slice(boot_rom);
         bus
     }
 
     pub fn read8(&self, addr: u16) -> u8 {
         match addr {
+            // Ppu:  tile_data, lcd regs, wy and wx 
+            0x8000..=0x9FFF | 0xFF40..=0xFF45 | 0xFF4A..=0xFF4B  => {
+                self.ppu.read8(addr)
+            },
+
+            // Serial Data Transfer
+            0xFF01..=0xFF02 => {
+                //println!("serial addr: {:04X}", addr);
+                0
+                //self.serial.read8(addr)
+            },
+
+            // Timer
             0xFF04..=0xFF07 => {
                 self.timer.read8(addr)
             },
+
+            // Interrupt
             0xFFFF | 0xFF0F => {
                 self.interrupts.read8(addr)
             },
-            // TODO: Ppu VRAM
 
             _ => {
                 self.mem[addr as usize]
@@ -40,9 +55,24 @@ impl Bus {
 
     pub fn write8(&mut self, addr: u16, val: u8) {
         match addr {
+            0x8000..=0x9FFF | 0xFF40 => {
+                self.ppu.write8(addr, val);
+            },
+
+            0xFF01 => {
+                //println!("serial addr: {:04X}, val: {:02X}", addr, val);
+                let c = val as char;
+                print!("{}",c);
+            //    self.serial.write8(addr, val);
+            }
             0xFF04..=0xFF07 => {
                 self.timer.write8(addr, val);
             },
+
+            0xFF46 => {
+                self.ppu.write_oam_dma(val);
+            },
+
             0xFFFF | 0xFF0F => {
                 self.interrupts.write8(addr, val);
             },

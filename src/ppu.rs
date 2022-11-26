@@ -58,6 +58,9 @@ pub struct Ppu {
     pub tile_map: [u8; 0x800], // There are 2 tile map areas, 0x9800 - 9BFF, and 0x9C00 - 9FFFF
     pub tile_data: [u8; 0x1800], // 0x8000 - 0x9800 Tile Data memory
 
+    pub sprite_attributes: [u8; 160], // The Sprite Attribute Tables at 0xFE00, 4 bytes per sprite
+                                      // There are 40 entries. The HW makes use of 10 per scanline
+                                      
     // Implementation details
     pub interrupts: Shared<Interrupts>,
     pub lx: u64,        // Current dot for a line. There are 456 dots  in a scanline 
@@ -88,9 +91,85 @@ impl Ppu {
            line_buffer: vec![0;  SCREEN_WIDTH_PX as usize],
            tile_map: [0; 0x800],
            tile_data: [0; 0x1800],
+           sprite_attributes: [0; 160],
        }
     }
 
+    pub fn write8(&mut self, addr: u16, val: u8)  {
+        match addr {
+            0x8000..=0x97FF  => {
+                println!("Ppu::write8 tile_data : {:04X}, val: {:02X}", addr, val);
+                self.tile_data[(addr - 0x8000) as usize] = val;
+            },
+            0x9800..= 0x9FFF => {
+                println!("Ppu::write8 tile_map: {:04X}, value: {:02X}", addr, val);
+                self.tile_map[(addr - 0x9800) as usize] = val;
+            },
+            0xFE00..=0xFE9F => {
+                println!("Ppu::read8 sprite attribute: {:04X}, val: {:02X}", addr, val);
+                self.sprite_attributes[(addr - 0xFE00) as usize] = val;
+            },
+
+            0xFF40 => {
+                println!("Ppu LCDC write: {:02X}", val);
+                self.lcdc = val;
+            },
+
+            0xFF42 => { 
+                self.scy = val;
+            },
+
+            0xFF43 => {
+                self.scx = val;
+            },
+
+            _ => { 
+                panic!("Ppu::write8 unknown ppu address range: {:04X}, value: {:02X}", addr, val);
+            }
+        }
+    }
+
+    pub fn read8(&self, addr: u16) -> u8 {
+        match addr {
+            0x8000..=0x97FF => {
+                println!("Ppu::read8 tile_data : {:04X}", addr);
+                self.tile_data[(addr - 0x8000) as usize]
+            },
+
+            0x9800..=0x9FFF => {
+                println!("Ppu::write8 tile_map: {:04X}", addr);
+                self.tile_map[(addr - 0x9800) as usize]
+            },
+
+            0xFE00..=0xFE9F => {
+                println!("Ppu::read8 sprite attribute: {:04X}", addr);
+                self.sprite_attributes[(addr - 0xFE00) as usize]
+            },
+
+            0xFF40 => {
+                self.lcdc
+            },
+            0xFF42 => {
+                self.scy
+            },
+
+            0xFF43 => {
+                self.scx
+            }
+
+            0xFF44 => {
+                self.ly
+            },
+
+            _ => {
+                panic!("Ppu::read8 unkonwn ppu address range: {:04X}", addr);
+            }
+        }
+    }
+
+    pub fn write_oam_dma(&mut self, val: u8) {
+        println!("Ppu::write_oam_dma: {:02}", val);
+    }
     pub fn do_transfer_of_line(&mut self) {
         // This is called during the transfer mode, i.e. we are rendering a line 
         
@@ -99,10 +178,15 @@ impl Ppu {
 
         // Render the bg or window
         self.do_transfer_of_bg_or_window();
-        println!("line_buffer: {:?}", self.line_buffer);
+        //println!("line_buffer: {:?}", self.line_buffer);
+
+
         // Render the sprite layer
         self.do_transfer_of_sprites();
 
+
+        // Copy the line to the frame buffer, converting from color palette index into actual rgb
+        // color for display in GUI
     }
 
     pub fn do_transfer_of_bg_or_window(&mut self) {

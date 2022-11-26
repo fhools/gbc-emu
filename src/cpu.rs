@@ -383,7 +383,9 @@ impl LR35902Cpu {
             return 4;
         }
         let (_, cycles) = self.exec_one_instruction();
-        self.bus.tick(); 
+        for _ in 0..cycles {
+            self.bus.tick(); 
+        }
         cycles
     }
 
@@ -514,9 +516,6 @@ impl LR35902Cpu {
             }};
 
             (add $dst:tt $src:tt $n:expr) => {{
-                let srcval = load!($src);
-                let dstval = load!($dst) as u16;
-                let (resultval, overflowed) = dstval.overflowing_add(srcval as u16);
 
                 self.regs.f.n = false;
 
@@ -524,6 +523,9 @@ impl LR35902Cpu {
                 // from stackoverflow:
                 // overflow is when you add 2 numbers with the same sign but get a different sign
                 if stringify!($dst) == "a" {
+                    let srcval = load!($src) as u8;
+                    let dstval = load!($dst) as u8;
+                    let (resultval, overflowed) = dstval.overflowing_add(srcval);
                     //bit 4
                     self.regs.f.h = ((dstval as u8) ^ (srcval as u8) ^ (resultval as u8)) & 0x10 != 0;
                     self.regs.f.c = overflowed;
@@ -533,23 +535,31 @@ impl LR35902Cpu {
                     } else {
                         add_cycles = 1;
                     }
+                    store!($dst, resultval);
                 }  else if stringify!($dst) == "hl" {
+                    let srcval = load!($src);
+                    let dstval = load!($dst) as u16;
+                    let (resultval, overflowed) = dstval.overflowing_add(srcval as u16);
                     // bit 12
                     self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x1000 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
                     add_cycles = 2;
+                    store!($dst, resultval);
                 } else if stringify!($dst) == "sp" {
+                    let srcval = load!($src);
+                    let dstval = load!($dst) as u16;
+                    let (resultval, _) = dstval.overflowing_add(srcval as u16);
                     // bit 4
                     self.regs.f.h = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x10 != 0;
                     // bit 8
                     self.regs.f.c = ((dstval as u16) ^ (srcval as u16) ^ (resultval as u16)) & 0x100 != 0;
                     self.regs.f.z = false;
                     add_cycles = 4;
+                    store!($dst, resultval);
 
                 }
                 //println!("add resultval: {:#X}, srcval: {:#X}, dstval: {:#X}", resultval, srcval, dstval);
-                store!($dst, resultval);
                 //println!("{} bytes: add {} = {} + {}", $n, stringify!($dst), stringify!($dst), stringify!($src));
                 ($n as u8, add_cycles)
             }};
@@ -577,8 +587,9 @@ impl LR35902Cpu {
                     "c" =>  { self.regs.f.c },
                     _ => { panic!("jr condflags unknown {}", condflags);}
                 };
+                //println!("{} bytes: jr {}, {:#06X} (final: {:#06X})", $n, stringify!($op1), addr_offset, addr);
                 if condmet {
-                    self.set_pc(self.regs.pc.wrapping_add(addr_offset));
+                    self.set_pc(addr);
                 }
                 //println!("{} bytes: jr {}, {:#06X} (final: {:#06X})", $n, stringify!($op1), addr_offset, addr);
 
@@ -800,7 +811,7 @@ impl LR35902Cpu {
 
             (cp $opr:tt $n:expr) => {{
                 let oprval = load!($opr);
-                let (result, overflowed) = self.regs.a.overflowing_add(oprval);
+                let (result, overflowed) = self.regs.a.overflowing_sub(oprval);
                 self.regs.f.z = result == 0;
                 self.regs.f.n = true;
                 self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
