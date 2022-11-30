@@ -16,10 +16,19 @@ impl Bus {
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
         };
-        // note: when i did bus.copy_from_slice, got panic that source len != dest len
-        // so had to transform dest into a slice first
-        bus.mem[0..initial_mem.len()].copy_from_slice(&Vec::from(initial_mem)[..]);
+        bus.mem[0..initial_mem.len()].copy_from_slice(initial_mem);
         bus.mem[0..256].copy_from_slice(boot_rom);
+        bus
+    }
+
+    pub fn new_without_bootrom(initial_mem: &[u8],  mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+        let mut bus =     Bus {
+            mem: mem.clone(),
+            timer: Timer::new(interrupts.clone()),
+            interrupts: interrupts.clone(),
+            ppu: ppu.clone(),
+        };
+        bus.mem[0..initial_mem.len()].copy_from_slice(initial_mem);
         bus
     }
 
@@ -55,7 +64,7 @@ impl Bus {
 
     pub fn write8(&mut self, addr: u16, val: u8) {
         match addr {
-            0x8000..=0x9FFF | 0xFF40 => {
+            0x8000..=0x9FFF | 0xFF40..=0xFF43 | 0xFF45 | 0xFF4A..=0xFF4B => {
                 self.ppu.write8(addr, val);
             },
 

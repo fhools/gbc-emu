@@ -35,16 +35,18 @@ pub enum PpuMode {
 
 pub struct Ppu {
     // Registers
-    pub lcdc: u8,                // 0xFF30 LCD Control
-                            //      Bit 7 - LCD and PPU enable
-                            //      Bit 6 - Window tile map area. 0 = 9800 - 9BFF , 1 = 9C00 - 9FFF
-                            //      Bit 5 - Window enabe
-                            //      Bit 4 - BG and Window Tile Data 0 = 8800- 97FF, 1 = 8000 -8FFFF
-                            //      Bit 3 - BG Tile Map Area  0 = 9800 - 9BFF, 1 = 9C000 - 9FFFF
-                            //      Bit 2 - OBJ Size 0 = 8x8, 1=8x16
-                            //      Bit 1 - OBJ enable 
-                            //      Bit 0 - BG and enable priority
+    pub lcdc: u8,               // 0xFF40 LCD Control
+                                //      Bit 7 - LCD and PPU enable
+                                //      Bit 6 - Window tile map area. 0 = 9800 - 9BFF , 1 = 9C00 - 9FFF
+                                //      Bit 5 - Window enabe
+                                //      Bit 4 - BG and Window Tile Data 0 = 8800- 97FF, 1 = 8000 -8FFFF
+                                //      Bit 3 - BG Tile Map Area  0 = 9800 - 9BFF, 1 = 9C000 - 9FFFF
+                                //      Bit 2 - OBJ Size 0 = 8x8, 1=8x16
+                                //      Bit 1 - OBJ enable 
+                                //      Bit 0 - BG and enable priority
 
+    pub lcdstat: u8,            // 0xFF41 LCD Status 
+                                
     pub scy: u8,                // 0xFF42 SCY Viewport Y Position 
     pub scx: u8,                // 0xFF43 SCX Viewport X Position
     pub ly: u8,                 // 0xFF44 LY current line being drawn. 0 - 143 is screen. 144-153 is VBLANK
@@ -78,6 +80,7 @@ impl Ppu {
     pub fn new(interrupts: Shared<Interrupts>) -> Ppu {
        Ppu {
            lcdc: 0,
+           lcdstat: 0,
            scy: 0,
            scx: 0,
            ly: 0,
@@ -98,21 +101,25 @@ impl Ppu {
     pub fn write8(&mut self, addr: u16, val: u8)  {
         match addr {
             0x8000..=0x97FF  => {
-                println!("Ppu::write8 tile_data : {:04X}, val: {:02X}", addr, val);
+                //println!("Ppu::write8 tile_data : {:04X}, val: {:02X}", addr, val);
                 self.tile_data[(addr - 0x8000) as usize] = val;
             },
             0x9800..= 0x9FFF => {
-                println!("Ppu::write8 tile_map: {:04X}, value: {:02X}", addr, val);
+                //println!("Ppu::write8 tile_map: {:04X}, value: {:02X}", addr, val);
                 self.tile_map[(addr - 0x9800) as usize] = val;
             },
             0xFE00..=0xFE9F => {
-                println!("Ppu::read8 sprite attribute: {:04X}, val: {:02X}", addr, val);
+                //println!("Ppu::read8 sprite attribute: {:04X}, val: {:02X}", addr, val);
                 self.sprite_attributes[(addr - 0xFE00) as usize] = val;
             },
 
             0xFF40 => {
-                println!("Ppu LCDC write: {:02X}", val);
+                //println!("Ppu LCDC write: {:02X}", val);
                 self.lcdc = val;
+            },
+
+            0xFF41 => {
+                self.lcdstat = val;
             },
 
             0xFF42 => { 
@@ -121,6 +128,15 @@ impl Ppu {
 
             0xFF43 => {
                 self.scx = val;
+            },
+            0xFF45 => {
+                self.lyc = val;
+            },
+            0xFF4A => {
+                self.wy = val;
+            },
+            0xFF4B => {
+                self.wx = val;
             },
 
             _ => { 
@@ -132,23 +148,28 @@ impl Ppu {
     pub fn read8(&self, addr: u16) -> u8 {
         match addr {
             0x8000..=0x97FF => {
-                println!("Ppu::read8 tile_data : {:04X}", addr);
+                //println!("Ppu::read8 tile_data : {:04X}", addr);
                 self.tile_data[(addr - 0x8000) as usize]
             },
 
             0x9800..=0x9FFF => {
-                println!("Ppu::write8 tile_map: {:04X}", addr);
+                //println!("Ppu::write8 tile_map: {:04X}", addr);
                 self.tile_map[(addr - 0x9800) as usize]
             },
 
             0xFE00..=0xFE9F => {
-                println!("Ppu::read8 sprite attribute: {:04X}", addr);
+                //println!("Ppu::read8 sprite attribute: {:04X}", addr);
                 self.sprite_attributes[(addr - 0xFE00) as usize]
             },
 
             0xFF40 => {
                 self.lcdc
             },
+
+            0xFF41 => {
+                self.lcdstat
+            },
+
             0xFF42 => {
                 self.scy
             },
@@ -160,6 +181,15 @@ impl Ppu {
             0xFF44 => {
                 self.ly
             },
+            0xFF45 => {
+                self.lyc
+            },
+            0xFF4A => {
+                self.wy
+            },
+            0xFF4B => {
+                self.wx
+            },
 
             _ => {
                 panic!("Ppu::read8 unkonwn ppu address range: {:04X}", addr);
@@ -168,7 +198,7 @@ impl Ppu {
     }
 
     pub fn write_oam_dma(&mut self, val: u8) {
-        println!("Ppu::write_oam_dma: {:02}", val);
+        //println!("Ppu::write_oam_dma: {:02}", val);
     }
     pub fn do_transfer_of_line(&mut self) {
         // This is called during the transfer mode, i.e. we are rendering a line 
@@ -326,6 +356,9 @@ impl Ppu {
                 self.lwy = 0;
                 // The frame is done
             }
+
+
+            // TODO: Check LY = LYC and set LCDSTAT bit
         }
 
         // Are we in the non-vblank period 
@@ -359,6 +392,7 @@ impl Ppu {
 }
 
 
+#[ignore]
 #[test]
 fn test_ppu() {
     use crate::ppu::Ppu;

@@ -54,8 +54,70 @@ impl GbcApp {
         0xC3,    // jp 0x0000 ; go back to beginning
         0x00,
         0x00,
-        ]; 
+        ];
+        
+    let prog_ld_highram  = [0x00, // nop
+                        0x3E, // ld a, $FE
+                        0xFE,
+                        0xEA, // ld ($FF90), a
+                        0x90,
+                        0xFF,
+                        0x3E, 
+                        0xDC, // ld a, $DC
+                        0xEA, // ld $(FF91), a
+                        0x91,
+                        0xFF,
+                        0x3E, // ld a, $BA
+                        0xBA, 
+                        0xEA, // ld $(FF92), a
+                        0x92,
+                        0xFF,
+                        0xCE, // jp $0000
+                        0x00,
+                        0x00,
+                       0x00,
+    ]; 
 
+    let prog_ldh  = [ 0x00, //nop
+                    0x3E, // ld a, $DC
+                    0xDC, 
+                    0x0E, // ld c, $90
+                    0x90,
+                    0xEA, // ld $(FF91),a
+                    0x91,
+                    0xFF,
+                    0xF0, // ldh a ($91)
+                    0x91,
+                    0xE0, // ldh ($91), a
+                    0x91,
+                    0xF2, // ld a, (c)
+                    0xE2, // ld (c), a
+                    0xFA, // ld a, ($FF91)
+                    0x91,
+                    0xFF,
+                    0xEA, // ld ($FF91), a
+                    0x91,
+                    0xFF,
+                    0x08,  // ld ($FF91), sp
+                    0x91,
+                    0xFF,
+                    0x01,  // ld bc, $0123
+                    0x23,
+                    0x01,
+                    0x11, // ld de, $0123
+                    0x23,
+                    0x01,
+                    0x21, // ld hl, $0123
+                    0x23,
+                    0x01,
+                    0x31, // ld sp, $0123
+                    0x23,
+                    0x01,
+                    0xF5, // push af
+                    0xC5, // push bc 
+                    0xD5, // push de
+                    0xE5, // push hl
+        ];
         // The timer ISR to run
         let isr_FF50 = [
             0x03, // inc h
@@ -63,21 +125,34 @@ impl GbcApp {
         ];
 
         let mut code_buffer = vec![0u8; 0xFFFF];
-        code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
-        code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
+        //code_buffer[0..main_program.len()].copy_from_slice(&main_program[..]);
+        code_buffer[0..prog_ldh.len()].copy_from_slice(&prog_ldh[..]);
+        //code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
-        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        //let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        //let rom = read_rom("roms/01-special.gb").unwrap();
+        //let rom = read_rom("roms/02-interrupts.gb").unwrap();
+        //let rom = read_rom("roms/03-op-sh-hl.gb").unwrap();
+        //let rom = read_rom("roms/04-op-r-imm.gb").unwrap();
+        //let rom = read_rom("roms/05-op-rp.gb").unwrap();
+        //let rom = read_rom("roms/06-ld-r-r.gb").unwrap();
+        //let rom = read_rom("roms/07-jr-jp-call-ret-rst.gb").unwrap();
+        //let rom = read_rom("roms/08-misc-instrs.gb").unwrap();
+        //let rom = read_rom("roms/09-op-r-r.gb").unwrap();
+        //let rom = read_rom("roms/10-bit-ops.gb").unwrap();
+        //let rom = read_rom("roms/11-op-a-hl.gb").unwrap();
         println!("rom size: {}", rom.len());
 
         let mem = Shared::new(vec![0u8; 0x10000]);
         let interrupts = Shared::new(Interrupts::default());
         let ppu = Shared::new(Ppu::new(interrupts.clone()));
         //let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
-        let bus = Shared::new(Bus::new(&rom, &BOOT_ROM, mem.clone(), interrupts.clone(), ppu.clone()));
+        let bus = Shared::new(Bus::new_without_bootrom(&rom, mem.clone(), interrupts.clone(), ppu.clone()));
+        //let bus = Shared::new(Bus::new_without_bootrom(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
         // For ISR test program starts at 0x0
         //let cpu = LR35902Cpu::new(0x0, bus.clone());
 
-        let cpu = LR35902Cpu::new(0x0, bus.clone());
+        let cpu = LR35902Cpu::new(0x100, bus.clone());
     
         GbcApp {
             cpu: cpu,
