@@ -166,7 +166,7 @@ pub struct Timer {
                  //
 
     // Implementation details
-    pub prev_clock_overflow_bit: bool,
+    pub prev_clock_overflow: bool,
     pub tima_overflowed: bool,
     pub tima_reloaded: bool,
 
@@ -201,8 +201,8 @@ impl Default for Interrupts {
         Interrupts {
             interrupt_enable_reg: 0x0,
             interrupt_flag: 0x0,
-            ime: true,
-            prev_ime: true,
+            ime: false,
+            prev_ime: false,
         }
     }
 }
@@ -248,8 +248,8 @@ impl Timer {
             div: 0,
             tima: 0,
             tma: 0,
-            tac: 1,
-            prev_clock_overflow_bit: false,
+            tac: 0,
+            prev_clock_overflow: false,
             tima_overflowed: false,
             tima_reloaded: false,
             interrupts: interrupts.clone(),
@@ -258,6 +258,7 @@ impl Timer {
     fn tick(&mut self) { 
         self.div = self.div.wrapping_add(Timer::TIMER_TICK_PER_CPU_TICK);
 
+        //println!("tima: {}, self.div: {}", self.tima, self.div);
         self.tima_reloaded = false;
 
         // From Pandocs. When TIMA overflows, it does not load TMA immediately, there is a cycle
@@ -272,15 +273,19 @@ impl Timer {
 
        let clock_select = self.tac & 0x3;
        let clock_overflow_bits: u8 = [9, 3, 5, 7][clock_select as usize];
-       let cur_timer_overflow_bit = (self.div >> clock_overflow_bits & 0x1) == 1;
-       if self.prev_clock_overflow_bit && !cur_timer_overflow_bit {
+       let cur_timer_overflow_bit = ((self.div >> clock_overflow_bits) & 0x1) == 1;
+       let timer_enabled = (self.tac >> 2) & 1 == 1;
+       // if the right timer bit was previously on and now its off then we overflowed the timer
+       if self.prev_clock_overflow && !(cur_timer_overflow_bit && timer_enabled) {
            let (new_tima, overflowed) = self.tima.overflowing_add(1);
+           //println!("tima tick: {}", self.tima);
            self.tima = new_tima;
            if overflowed {
+               //println!("timer overflowed");
                self.tima_overflowed = true;
            }
        }
-       self.prev_clock_overflow_bit = cur_timer_overflow_bit;
+       self.prev_clock_overflow = cur_timer_overflow_bit && timer_enabled;
     }
 
     pub fn write8(&mut self, addr: u16, val: u8) {

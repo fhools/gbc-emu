@@ -119,6 +119,7 @@ impl GbcApp {
                     0xE5, // push hl
         ];
         // The timer ISR to run
+        // FIXME: Wrong ISR address its at 0x0050
         let isr_FF50 = [
             0x03, // inc h
             0xD9, // RETI
@@ -131,7 +132,7 @@ impl GbcApp {
 
         //let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         //let rom = read_rom("roms/01-special.gb").unwrap();
-        //let rom = read_rom("roms/02-interrupts.gb").unwrap();
+        let rom = read_rom("roms/02-interrupts.gb").unwrap();
         //let rom = read_rom("roms/03-op-sh-hl.gb").unwrap();
         //let rom = read_rom("roms/04-op-r-imm.gb").unwrap();
         //let rom = read_rom("roms/05-op-rp.gb").unwrap();
@@ -267,6 +268,7 @@ impl eframe::App for GbcApp {
             }
 
 
+
             // If not in continous run mode, display step button
             ui.add_enabled_ui(!self.run_continuous, |ui| {
                 // Execute one instruction on step clicked
@@ -276,7 +278,7 @@ impl eframe::App for GbcApp {
                     }
                 }
             });
-
+            
             // Enable/Disable continous running
             ui.checkbox(&mut self.run_continuous, "Run");
             if  self.run_continuous {
@@ -287,6 +289,13 @@ impl eframe::App for GbcApp {
                     // get time before 
                     // there are 17476 cpu ticks  in a frame of 60 FPS
                     while cycles_accum < 17476 {
+                        // DEBUG: Set "breakpoint" on EI instruction.
+                        let opcode = self.cpu.load8(self.cpu.pc());
+                        if opcode == 0xFB {
+                            println!("pausing at EI");
+                            self.run_continuous = false;
+                            break;
+                        }
                         // compute cycle delta
                         let prev_pc = self.cpu.pc();
                         let mut cpu_cycle = self.cpu.step() as u64;

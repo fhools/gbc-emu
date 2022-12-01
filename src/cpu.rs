@@ -11,6 +11,7 @@ impl<const V: u8> ConstEval<V> {
  * Blargg's cpu test
  *
  * [OK] 01-special
+ * [  ] 02-interrupts
  * [OK] 03-op, sp,hl 
  *      NOTE: fixed ld (nn), sp! it loads the 16 bit value of sp onto address specified by nn. i
  *      was incorrectly loading 8 bit value of the top of stack value! 
@@ -321,6 +322,21 @@ impl LR35902Cpu {
             _ => panic!("unknown ld opr: {}", opr)
         }
     }
+
+    pub fn get_ld_cycles2(&self, dest: &str, src: &str) -> u8 {
+        match ((dest, src)) {
+            ("bc", "nn") | ("de", "nn") | ("hl", "nn") | ("sp", "nn") => 3,
+            ("(bc)", "a") | ("(de)", "a") | ("(hl+)", "a") | ("(hl-)", "a") => 2,
+            ("b", "n") | ("d", "n") | ("h" , "n") | ("(hl)", "n") => 2, 
+            ("(hl)", "n") => 3,
+            ("a", "(bc)") | ("a" , "(de)") | ("a", "(hl+)") | ("a", "(hl-)") => 2,
+            ("(n)", "a") | ("a", "(n)") => 3,
+            ("(c)", "a") | ("a", "(c)") => 2,
+            ("sp", "hl") => 2,
+            ("(nn)", "a") | ("a", "(nn)") => 4,
+            _ => 1
+        }
+    }
     /*
      * disassemble opcode, using pc to fetch the rest of 
      * the instruction operands 
@@ -378,7 +394,8 @@ impl LR35902Cpu {
         if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // get ISR address
             let which_int = self.bus.interrupts.interrupt_flag.trailing_zeros();
-            let isr_addr = (0xFF40 as u16).wrapping_add(8*which_int as u16);
+            println!("ISR # raised: {}", which_int);
+            let isr_addr = (0x0040 as u16).wrapping_add(8*which_int as u16);
             let pc = self.pc();
 
             // push return address onto stack
@@ -392,6 +409,8 @@ impl LR35902Cpu {
             self.bus.interrupts.prev_ime = false;
             // clear interrupt flag for the interrupt
             self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
+            println!("interrupt flag is now: {:02X}", self.bus.interrupts.interrupt_flag);
+            //self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
             println!("running isr: addr: {:04X}", isr_addr);
             self.set_pc(isr_addr);
             self.bus.tick(); 
@@ -500,8 +519,9 @@ impl LR35902Cpu {
                 let srcval = load!($src);
                 store!($dst, srcval);
                 let mut ldcycles = 1;
-                ldcycles += self.get_ld_cycles(stringify!($dst));
-                ldcycles += self.get_ld_cycles(stringify!($src));
+                //ldcycles += self.get_ld_cycles(stringify!($dst));
+                //ldcycles += self.get_ld_cycles(stringify!($src));
+                ldcycles = self.get_ld_cycles2(stringify!($dst), stringify!($src));
                 //println!("{} bytes: ld {} = {:#X}", $n, stringify!($dst), srcval);
                 ($n as u8, ldcycles)
             }};
@@ -568,7 +588,7 @@ impl LR35902Cpu {
                     self.regs.f.h = ((dstval as u8) ^ (srcval as u8) ^ (resultval as u8)) & 0x10 != 0;
                     self.regs.f.c = overflowed;
                     self.regs.f.z = resultval == 0;
-                    if stringify!($src) == "(hl)" {
+                    if stringify!($src) == "(hl)" || stringify!($src) == "n" {
                         add_cycles = 2;
                     } else {
                         add_cycles = 1;
@@ -637,7 +657,7 @@ impl LR35902Cpu {
 
             (stop $n:expr) => {{
                 // TODO: dont know what this does yet
-                println!("{} bytes: stop", $n);
+                //println!("{} bytes: stop", $n);
                 ($n as u8, 1)
             }};
 
@@ -724,22 +744,22 @@ impl LR35902Cpu {
                     // this will cause upper nibble to wrap to A 
                     // so it will need to be adjusted.
                     if self.regs.f.c || aval > 0x99 {
-                        aval += 0x60;
+                        aval = aval.wrapping_add(0x60);
                         self.regs.f.c = true;
                     }
                     // adjust lower nibble, upper nibble will already be adjusted
                     // via the above section
                     if self.regs.f.h || (aval & 0x0f) > 0x9 {
-                        aval += 0x6;
+                        aval = aval.wrapping_add(0x6);
                     }
                 } else {
                     // if carry flag set upper nibble needs to be adjusted
                     if self.regs.f.c {
-                        aval -= 0x60;
+                        aval  = aval.wrapping_sub(0x60);
                     }
                     // if half-carry was set then lower nibble needs to be adjusted
                     if self.regs.f.h {
-                        aval -= 0x6;
+                        aval = aval.wrapping_sub(0x6);
                     }
                 }
                 self.regs.f.z = (aval == 0x00);
@@ -801,7 +821,7 @@ impl LR35902Cpu {
                 self.regs.f.h = (result ^ oprval ^ self.regs.a) & 0x10 != 0;
                 self.regs.f.c = overflowed;
                 store!(a, result);
-                let sub_cycles = if stringify!($src) == "(hl)" { 2 } else { 1 };
+                let sub_cycles = if stringify!($opr) == "(hl)" { 2 } else { 1 };
                 //println!("{} bytes: sub {}", $n, stringify!($opr));
                 ($n as u8, sub_cycles)
             }};
@@ -815,8 +835,7 @@ impl LR35902Cpu {
                 self.regs.f.c = overflowed;
                 store!(a, result);
                 //println!("{} bytes: sub {:#04X}", $n, oprval);
-                let sub_cycles = if stringify!($src) == "n" { 2 } else { 1 };
-                ($n as u8, sub_cycles)
+                ($n as u8, 2)
             }};
 
             (sbc $dst:tt $src:tt $n:expr) => {{
@@ -892,6 +911,7 @@ impl LR35902Cpu {
                 // enable interrupt when returning form ISR via RETI
                 // also has 1 cycle delay
                 self.bus.interrupts.ime = true;
+                println!("reti!");
                 ($n as u8, 4)
             }};
 
@@ -905,8 +925,7 @@ impl LR35902Cpu {
                 self.set_pc(ret_addr);
                 //println!("{} bytes: ret", $n);
 
-                // TODO: Cycles actually 5/2
-                ($n as u8, 2)
+                ($n as u8, 4)
             }};
             
             (ret $conds:ident $n:expr) => {{
@@ -918,6 +937,7 @@ impl LR35902Cpu {
                     "c" => { self.regs.f.c },
                     _ => { panic!("ret cond: {} unknown", condflags); }
                 };
+                let mut ret_cycles = 2;
                 if cond_met {
                     let lo = self.load8(self.regs.sp) as u16;
                     self.regs.sp = self.regs.sp.wrapping_add(1);
@@ -925,17 +945,17 @@ impl LR35902Cpu {
                     self.regs.sp = self.regs.sp.wrapping_add(1);
                     let ret_addr = (hi << 8) | lo;
                     self.set_pc(ret_addr);
+                    ret_cycles = 5;
                 }
                 //println!("{} bytes: ret {}", $n, condflags);
-                // TODO: cycles actually 5/2
-                ($n as u8, 2)
+                ($n as u8, ret_cycles)
             }};
            
             (pop bc $n:expr) => {{
                 let lo = self.load8(self.regs.sp);
                 let hi = self.load8(self.regs.sp.wrapping_add(1));
                 self.regs.set_bc( ((hi as u16) << 8) | lo as u16);
-                self.regs.sp += 2;
+                self.regs.sp = self.regs.sp.wrapping_add(2);
                 //println!("{} bytes: pop bc ", $n);
                 ($n as u8, 3)
             }};
@@ -944,7 +964,7 @@ impl LR35902Cpu {
                 let lo = self.load8(self.regs.sp);
                 let hi = self.load8(self.regs.sp.wrapping_add(1));
                 self.regs.set_de( ((hi as u16) << 8) | lo as u16);
-                self.regs.sp += 2;
+                self.regs.sp = self.regs.sp.wrapping_add(2);
                 //println!("{} bytes: pop de ", $n);
                 ($n as u8, 3)
             }};
@@ -953,7 +973,7 @@ impl LR35902Cpu {
                 let lo = self.load8(self.regs.sp);
                 let hi = self.load8(self.regs.sp.wrapping_add(1));
                 self.regs.set_hl( ((hi as u16) << 8) | lo as u16);
-                self.regs.sp += 2;
+                self.regs.sp = self.regs.sp.wrapping_add(2);
                 //println!("{} bytes: pop hl ", $n);
                 ($n as u8, 3)
             }};
@@ -962,7 +982,7 @@ impl LR35902Cpu {
                 let lo = self.load8(self.regs.sp) & 0xF0;
                 let hi = self.load8(self.regs.sp.wrapping_add(1));
                 self.regs.set_af( ((hi as u16) << 8) | lo as u16);
-                self.regs.sp += 2;
+                self.regs.sp  = self.regs.sp.wrapping_add(2);
                 //println!("{} bytes: pop af ", $n);
                 ($n as u8, 3)
             }};
@@ -999,15 +1019,17 @@ impl LR35902Cpu {
                     "c" => {  self.regs.f.c },
                     _ => { panic!("call cond flag: {} is unknown!", condflags); }
                 };
+                let mut call_cycles = 3;
                 if cond_met {
                     self.regs.sp = self.regs.sp.wrapping_sub(1);
                     self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                     self.regs.sp = self.regs.sp.wrapping_sub(1);
                     self.store8(self.regs.sp, (self.regs.pc & 0xFF) as u8);
                     self.set_pc(addr);
+                    call_cycles = 6;
                 }
                 //println!("{} bytes: call {} {:x}", $n, condflags, addr);
-                ($n as u8, 4)
+                ($n as u8, call_cycles)
             }};
             
             (call nn $n:expr) => {{
@@ -1018,7 +1040,7 @@ impl LR35902Cpu {
                 self.store8(self.regs.sp, (self.regs.pc & 0xFF) as u8);
                 self.set_pc(addr);
                 //println!("{} bytes: call nn (addr:{:#X})", $n, addr);
-                ($n as u8, 4)
+                ($n as u8, 6)
             }};
              
              (jp nn $n:expr) => {{ 
@@ -1038,12 +1060,14 @@ impl LR35902Cpu {
                      "c" => { self.regs.f.c},
                      _ => { panic!("cp cond: {} unknown", condflags); }
                  };
+
+                 let mut jp_cycles = 3;
                  if cond_met {
                      self.set_pc(addr);
+                     jp_cycles = 4;
                  }
                  //println!("{} bytes: jp {} {:#06X}", $n, condflags, addr);
-                 // TODO: cycles actually 4/3
-                ($n as u8, 4)
+                ($n as u8, jp_cycles)
              }};
 
              (jp hl $n:expr) => {{
@@ -1065,6 +1089,7 @@ impl LR35902Cpu {
                  // NOTE: EI is delayed 1 instruction. we set ime but use prev_ime to test
                  // interrupt enable
                  self.bus.interrupts.ime = true;
+                 println!("ei called");
                  //println!("{} bytes: ei", $n);
                  ($n as u8, 1)
              }}; 
@@ -1464,7 +1489,7 @@ impl LR35902Cpu {
         }
 
         let (oplen, cycles) = use_z80_table!(gen_z80_exec_handlers);
-        self.stats.num_instrs_executed += 1;
+        self.stats.num_instrs_executed = self.stats.num_instrs_executed.wrapping_add(1);
         (oplen, cycles)
     }
 
@@ -1614,6 +1639,8 @@ fn test_interrupts() {
                        0x00,
     ]; 
 
+
+    // FIXME: ISR is not at 0xFF40! starts at 0x0040
     let isr_FF40 = [
                     0x03, // inc h
                     0xD9, // RETI
@@ -1630,6 +1657,7 @@ fn test_interrupts() {
     let mut cpu = LR35902Cpu::new(0x0, bus.clone());
     
     while (((cpu.pc() as i32) < (main_program.len() as i32)) ||
+           // FIXME: Wrong ISR
            ((cpu.pc() as u16) == 0xFF40) || 
            ((cpu.pc() as u16) == 0xFF41)) 
         && cpu.instructions_executed() < MAX_INSTRUCTIONS_TO_RUN {
