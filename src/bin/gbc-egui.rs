@@ -290,12 +290,12 @@ impl eframe::App for GbcApp {
                     // there are 17476 cpu ticks  in a frame of 60 FPS
                     while cycles_accum < 17476 {
                         // DEBUG: Set "breakpoint" on EI instruction.
-                        let opcode = self.cpu.load8(self.cpu.pc());
-                        if opcode == 0xFB {
-                            println!("pausing at EI");
-                            self.run_continuous = false;
-                            break;
-                        }
+                        //let opcode = self.cpu.load8(self.cpu.pc());
+                        //if opcode == 0xFB {
+                        //    println!("pausing at EI");
+                        //    self.run_continuous = false;
+                        //    break;
+                        //}
                         // compute cycle delta
                         let prev_pc = self.cpu.pc();
                         let mut cpu_cycle = self.cpu.step() as u64;

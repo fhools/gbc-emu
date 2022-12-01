@@ -265,6 +265,7 @@ pub struct CpuStatistics {
 pub struct LR35902Cpu {
     pub bus: Shared<Bus>,
     pub regs: Registers,
+    pub halted: bool,
     stats: CpuStatistics,
 }
 
@@ -274,6 +275,7 @@ impl LR35902Cpu {
         let mut cpu = LR35902Cpu {
             bus,
             regs: Default::default(),
+            halted: false,
             stats: Default::default()
         };
         cpu.regs.pc = start_pc;
@@ -391,10 +393,22 @@ impl LR35902Cpu {
         self.bus.interrupts.prev_ime = self.bus.interrupts.ime;
 
         // if interrupt enabled and we got a interrupt pending
+        if self.halted  {
+            if (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
+                if prev_ime {
+                    self.halted = false;
+                } else {
+                    self.halted = false;
+                }
+            } 
+            // TODO: I think there is a bug, RGBDS website says that if IME is not set then the
+            // interrupt handler is not called when CPU resumes from interrupt pending
+        }
+
         if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // get ISR address
             let which_int = self.bus.interrupts.interrupt_flag.trailing_zeros();
-            println!("ISR # raised: {}", which_int);
+            //println!("ISR # raised: {}", which_int);
             let isr_addr = (0x0040 as u16).wrapping_add(8*which_int as u16);
             let pc = self.pc();
 
@@ -409,9 +423,8 @@ impl LR35902Cpu {
             self.bus.interrupts.prev_ime = false;
             // clear interrupt flag for the interrupt
             self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
-            println!("interrupt flag is now: {:02X}", self.bus.interrupts.interrupt_flag);
-            //self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
-            println!("running isr: addr: {:04X}", isr_addr);
+            //println!("interrupt flag is now: {:02X}", self.bus.interrupts.interrupt_flag);
+            //println!("running isr: addr: {:04X}", isr_addr);
             self.set_pc(isr_addr);
             self.bus.tick(); 
             self.bus.tick(); 
@@ -421,11 +434,16 @@ impl LR35902Cpu {
             return 4;
         }
 
-        let (_, cycles) = self.exec_one_instruction();
-        for _ in 0..cycles {
-            self.bus.tick(); 
+        if !self.halted {
+            let (_, cycles) = self.exec_one_instruction();
+            for _ in 0..cycles {
+                self.bus.tick(); 
+            }
+            cycles
+        } else {
+            self.bus.tick();
+            1
         }
-        cycles
     }
 
     // Returns (instruction length in bytes, cycles)
@@ -793,6 +811,7 @@ impl LR35902Cpu {
 
             (halt $n:expr) => {{
                 //println!("{} bytes: halt", $n);
+                self.halted = true;
                 ($n as u8, 1)
             }};
 
@@ -1089,7 +1108,6 @@ impl LR35902Cpu {
                  // NOTE: EI is delayed 1 instruction. we set ime but use prev_ime to test
                  // interrupt enable
                  self.bus.interrupts.ime = true;
-                 println!("ei called");
                  //println!("{} bytes: ei", $n);
                  ($n as u8, 1)
              }}; 
