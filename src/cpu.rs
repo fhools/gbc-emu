@@ -326,7 +326,7 @@ impl LR35902Cpu {
     }
 
     pub fn get_ld_cycles2(&self, dest: &str, src: &str) -> u8 {
-        match ((dest, src)) {
+        match (dest, src) {
             ("bc", "nn") | ("de", "nn") | ("hl", "nn") | ("sp", "nn") => 3,
             ("(bc)", "a") | ("(de)", "a") | ("(hl+)", "a") | ("(hl-)", "a") => 2,
             ("b", "n") | ("d", "n") | ("h" , "n") | ("(hl)", "n") => 2, 
@@ -930,7 +930,6 @@ impl LR35902Cpu {
                 // enable interrupt when returning form ISR via RETI
                 // also has 1 cycle delay
                 self.bus.interrupts.ime = true;
-                println!("reti!");
                 ($n as u8, 4)
             }};
 

@@ -130,9 +130,9 @@ impl GbcApp {
         code_buffer[0..prog_ldh.len()].copy_from_slice(&prog_ldh[..]);
         //code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
-        //let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         //let rom = read_rom("roms/01-special.gb").unwrap();
-        let rom = read_rom("roms/02-interrupts.gb").unwrap();
+        //let rom = read_rom("roms/02-interrupts.gb").unwrap();
         //let rom = read_rom("roms/03-op-sh-hl.gb").unwrap();
         //let rom = read_rom("roms/04-op-r-imm.gb").unwrap();
         //let rom = read_rom("roms/05-op-rp.gb").unwrap();
@@ -144,11 +144,12 @@ impl GbcApp {
         //let rom = read_rom("roms/11-op-a-hl.gb").unwrap();
         println!("rom size: {}", rom.len());
 
-        let mem = Shared::new(vec![0u8; 0x10000]);
+        let rom = Shared::new(rom);
+        let mem = Shared::new(vec![0u8; 0x20000]);
         let interrupts = Shared::new(Interrupts::default());
         let ppu = Shared::new(Ppu::new(interrupts.clone()));
         //let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
-        let bus = Shared::new(Bus::new_without_bootrom(&rom, mem.clone(), interrupts.clone(), ppu.clone()));
+        let bus = Shared::new(Bus::new_without_bootrom(rom.clone(), mem.clone(), interrupts.clone(), ppu.clone()));
         //let bus = Shared::new(Bus::new_without_bootrom(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
         // For ISR test program starts at 0x0
         //let cpu = LR35902Cpu::new(0x0, bus.clone());

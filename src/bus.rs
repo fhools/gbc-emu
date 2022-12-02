@@ -1,94 +1,117 @@
 use crate::util::Shared;
 use crate::ppu::Ppu;
+use crate::mapper::{Mbc, Mapper};
 pub struct Bus {
     pub mem: Shared<Vec<u8>>,
     pub timer: Timer,
     pub interrupts: Shared<Interrupts>,
-    pub ppu: Shared<Ppu>
+    pub ppu: Shared<Ppu>,
+    pub mbc: Shared<Mbc>
 }
 
 
 impl Bus {
-    pub fn new(initial_mem: &[u8], boot_rom: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+    pub fn new(gb_rom: Shared<Vec<u8>>, boot_rom: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+        let mbc = Shared::new(Mbc::new(gb_rom.clone()));
         let mut bus =     Bus {
             mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
+            mbc: mbc.clone(),
         };
-        bus.mem[0..initial_mem.len()].copy_from_slice(initial_mem);
+        bus.mem[0..gb_rom.len()].copy_from_slice(&gb_rom);
         bus.mem[0..256].copy_from_slice(boot_rom);
         bus
     }
 
-    pub fn new_without_bootrom(initial_mem: &[u8],  mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+    pub fn new_without_bootrom(gb_rom: Shared<Vec<u8>>,  mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
+        let mbc = Shared::new(Mbc::new(gb_rom.clone()));
         let mut bus =     Bus {
             mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
+            mbc: mbc.clone(),
         };
-        bus.mem[0..initial_mem.len()].copy_from_slice(initial_mem);
+        bus.mem[0..gb_rom.len()].copy_from_slice(&gb_rom);
         bus
     }
 
     pub fn read8(&self, addr: u16) -> u8 {
-        match addr {
-            // Ppu:  tile_data, lcd regs, wy and wx 
-            0x8000..=0x9FFF | 0xFF40..=0xFF45 | 0xFF4A..=0xFF4B  => {
-                self.ppu.read8(addr)
-            },
+        let Some(val) = self.mbc.read8(addr)  else {
+            return match addr {
+                // Ppu:  tile_data, lcd regs, wy and wx 
+                0x8000..=0x9FFF | 0xFF40..=0xFF45 | 0xFF4A..=0xFF4B  => {
+                    self.ppu.read8(addr)
+                },
 
-            // Serial Data Transfer
-            0xFF01..=0xFF02 => {
-                //println!("serial addr: {:04X}", addr);
-                0
-                //self.serial.read8(addr)
-            },
+                // Serial Data Transfer
+                0xFF01..=0xFF02 => {
+                    //println!("serial addr: {:04X}", addr);
+                    0
+                        //self.serial.read8(addr)
+                },
 
-            // Timer
-            0xFF04..=0xFF07 => {
-                self.timer.read8(addr)
-            },
+                // Timer
+                0xFF04..=0xFF07 => {
+                    self.timer.read8(addr)
+                },
 
-            // Interrupt
-            0xFFFF | 0xFF0F => {
-                self.interrupts.read8(addr)
-            },
+                // Interrupt
+                0xFFFF | 0xFF0F => {
+                    self.interrupts.read8(addr)
+                },
 
-            _ => {
-                self.mem[addr as usize]
+
+                _ => {
+                    self.mem[addr as usize]
+                }
             }
-        }
+        };
+        val
     }
 
     pub fn write8(&mut self, addr: u16, val: u8) {
-        match addr {
-            0x8000..=0x9FFF | 0xFF40..=0xFF43 | 0xFF45 | 0xFF4A..=0xFF4B => {
-                self.ppu.write8(addr, val);
-            },
+        let Ok(_) =  self.mbc.write8(addr, val) else {
+            match addr {
+                0x8000..=0x9FFF | 0xFF40..=0xFF43 | 0xFF45 | 0xFF4A..=0xFF4B => {
+                    self.ppu.write8(addr, val);
+                },
 
-            0xFF01 => {
-                //println!("serial addr: {:04X}, val: {:02X}", addr, val);
-                let c = val as char;
-                print!("{}",c);
-            //    self.serial.write8(addr, val);
+                0xFF01 => {
+                    //println!("serial addr: {:04X}, val: {:02X}", addr, val);
+                    let c = val as char;
+                    match c {
+                        'a'..='z' | 'A'..='Z' | ' ' | 
+                        '\n' |'0'..='9' | ':' | '_' | 
+                        '-' | ',' | '(' | ')' => {
+                            print!("{}",c);
+                        },
+                        _ => {
+                            println!("weird char: {}", c);
+                        },
+                    }
+                    //    self.serial.write8(addr, val);
+                }
+                0xFF04..=0xFF07 => {
+                    self.timer.write8(addr, val);
+                },
+
+                0xFF46 => {
+                    self.ppu.write_oam_dma(val);
+                },
+
+                0xFFFF | 0xFF0F => {
+                    self.interrupts.write8(addr, val);
+                },
+                _ => {
+                    self.mem[addr as usize] = val;
+                }
             }
-            0xFF04..=0xFF07 => {
-                self.timer.write8(addr, val);
-            },
+            return;
+        };
 
-            0xFF46 => {
-                self.ppu.write_oam_dma(val);
-            },
-
-            0xFFFF | 0xFF0F => {
-                self.interrupts.write8(addr, val);
-            },
-            _ => {
-                self.mem[addr as usize] = val;
-            }
-        }
     }
 
     pub fn tick(&mut self) {
