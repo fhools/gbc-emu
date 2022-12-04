@@ -1,11 +1,13 @@
 use gbc_emu::cpu::{self, LR35902Cpu};
 use gbc_emu::bus::{self, Bus, Interrupts};
-use gbc_emu::ppu::Ppu;
+use gbc_emu::ppu::{self, Ppu};
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
 use gbc_emu::bootrom::BOOT_ROM;
 use eframe::egui;
+use egui::*;
 use std::time::Duration;
+use std::time::SystemTime;
 
 struct GbcApp {
     cpu: cpu::LR35902Cpu,
@@ -13,9 +15,75 @@ struct GbcApp {
     run_continuous: bool,
     addr_to_dump: String,
     cycles: u64,
+    is_gb_screen_open: bool,
+    frame_output_count: u32,
 }
 
 impl GbcApp {
+    const WIDTH: f32 = 160.0;
+    const HEIGHT: f32 = 144.0;
+    const COLORS: [color::Color32; 4] = [ color::Color32::from_rgb(255, 255, 255),
+                                          color::Color32::from_rgb(170, 170, 170), 
+                                          color::Color32::from_rgb(85, 85, 85),
+                                          color::Color32::from_rgb(0, 0, 0)];
+
+    fn screen_ui(&mut self, ui: &mut egui::Ui) {
+        let j: i32 = self.bus.ppu.ly as i32;
+        // allocate space in the child window
+        let (response, painter) = ui.allocate_painter(Vec2::new(320.0, 288.0), Sense::hover());
+
+        let gb_screen_size = Vec2::new(160.0, 144.0);
+        // create a transform to go from local space to global window space
+        let to_screen = emath::RectTransform::from_to(
+            Rect::from_min_size(Pos2::ZERO, gb_screen_size),
+            response.rect,
+            );
+
+        // output all the pixels, i'm using rects because i dont know any better way. seems kludgy
+        for j in 0..(144 as i32) {
+            for i in 0..(160 as i32) {
+                // output a rect that represents a pixel, coordinates are local to the window
+                let rect = Rect::from_min_max([i as f32, j as f32].into(), [(i+1) as f32, (j+1) as f32].into());
+                let dotcolor = Self::COLORS[self.bus.ppu.frame_buffer[j as usize][i as usize] as usize];
+                // draw the pixel, output to the window, painter wants global coordinates so use
+                // to_screen.tranform_rect
+                painter.add(egui::Shape::rect_filled(to_screen.transform_rect(rect), 
+                                                     0.0, 
+                                                     dotcolor));
+            }
+        }
+    }
+
+
+    fn tile_data_screen_ui(&mut self, ui: &mut egui::Ui) {
+        let (response, painter) = ui.allocate_painter(Vec2::new(320.0, 288.0), Sense::hover());
+
+        let gb_screen_size = Vec2::new(160.0, 144.0);
+        // create a transform to go from local space to global window space
+        let to_screen = emath::RectTransform::from_to(
+            Rect::from_min_size(Pos2::ZERO, gb_screen_size),
+            response.rect,
+            );
+
+        for j in 0..18 {
+            for i in 0..20 {
+                let tile = self.bus.ppu.get_tile_as_vec(j*20 + i);
+                for (y,tile_row) in tile.into_iter().enumerate() {
+                    for (x, color) in tile_row.into_iter().enumerate()  {
+                        // output a rect that represents a pixel, coordinates are local to the window
+                        let rect = Rect::from_min_max([(i*8 + (x as u16)) as f32, (j*8 + (y as u16)) as f32].into(), [((i*8 + (x as u16)) + 1) as f32, ((j*8 + (y as u16))  + 1) as f32].into());
+                        let dotcolor = Self::COLORS[color as usize];
+                        // draw the pixel, output to the window, painter wants global coordinates so use
+                        // to_screen.tranform_rect
+                        painter.add(egui::Shape::rect_filled(to_screen.transform_rect(rect), 
+                                                             0.0, 
+                                                             dotcolor));
+                    }
+                }
+            }
+        }
+    }
+
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
@@ -130,6 +198,9 @@ impl GbcApp {
         code_buffer[0..prog_ldh.len()].copy_from_slice(&prog_ldh[..]);
         //code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
+        //let rom = read_rom("/Users/fhools/Downloads/GB/Metroid2.gb").unwrap();
+        //let rom = read_rom("/Users/fhools/Downloads/GB/DonkeyKong.gb").unwrap();
+        //let rom = read_rom("/Users/fhools/Downloads/GB/Tetris/Tetris.gb").unwrap();
         let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         //let rom = read_rom("roms/01-special.gb").unwrap();
         //let rom = read_rom("roms/02-interrupts.gb").unwrap();
@@ -145,23 +216,25 @@ impl GbcApp {
         println!("rom size: {}", rom.len());
 
         let rom = Shared::new(rom);
-        let mem = Shared::new(vec![0u8; 0x20000]);
+        let mem = Shared::new(vec![0u8; 0x90000]);
         let interrupts = Shared::new(Interrupts::default());
         let ppu = Shared::new(Ppu::new(interrupts.clone()));
-        //let bus = Shared::new(Bus::new(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
-        let bus = Shared::new(Bus::new_without_bootrom(rom.clone(), mem.clone(), interrupts.clone(), ppu.clone()));
+        let bus = Shared::new(Bus::new(rom.clone(), &BOOT_ROM, mem.clone(), interrupts.clone(), ppu.clone()));
+        //let bus = Shared::new(Bus::new_without_bootrom(rom.clone(), mem.clone(), interrupts.clone(), ppu.clone()));
         //let bus = Shared::new(Bus::new_without_bootrom(&code_buffer, mem.clone(), interrupts.clone(), ppu.clone()));
         // For ISR test program starts at 0x0
         //let cpu = LR35902Cpu::new(0x0, bus.clone());
 
-        let cpu = LR35902Cpu::new(0x100, bus.clone());
-    
+        let cpu = LR35902Cpu::new(0x0, bus.clone());
+   
         GbcApp {
             cpu: cpu,
             bus: bus,
             run_continuous: false,
             addr_to_dump: String::new(),
-            cycles: 0
+            cycles: 0,
+            is_gb_screen_open: true,
+            frame_output_count: 0,
         }
     }
 }
@@ -228,6 +301,15 @@ fn show_instr(app: &GbcApp, pc: u16) -> String {
     let (_, disasm) = app.cpu.disasm(opcode);
     format!("{}", disasm)
 }
+
+// TODO:
+// This is  actually running really slowly, I think its due to us running our emulator inside of
+// egui update().
+// We should actually have our own main loop, inside our loop we should run
+// our emulator. Then we should manually call egui to execute the gui portion.
+// I believe egui update() is throttled by the host computer refresh rate.
+// Which kind of explains we are only being called at 60 fps.
+//
 impl eframe::App for GbcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -279,7 +361,9 @@ impl eframe::App for GbcApp {
                     }
                 }
             });
-            
+           
+            // Prime line output tracking
+            let mut line_output_count = self.bus.ppu.line_output_count;
             // Enable/Disable continous running
             ui.checkbox(&mut self.run_continuous, "Run");
             if  self.run_continuous {
@@ -289,7 +373,7 @@ impl eframe::App for GbcApp {
                 if (self.cpu.pc() as i32) < (self.bus.mem.len() as i32) {
                     // get time before 
                     // there are 17476 cpu ticks  in a frame of 60 FPS
-                    while cycles_accum < 17476 {
+                    while self.frame_output_count == self.bus.ppu.frame_output_count {
                         // DEBUG: Set "breakpoint" on EI instruction.
                         //let opcode = self.cpu.load8(self.cpu.pc());
                         //if opcode == 0xFB {
@@ -312,27 +396,53 @@ impl eframe::App for GbcApp {
                             self.cycles + (std::u64::MAX - prev_cycles)
                         };
                         cycles_accum = cycles_accum.wrapping_add(delta as u64); 
+
+
+
+
+
                     }
+                    self.frame_output_count = self.bus.ppu.frame_output_count;
                    
-                    // get time after gb
-
-
                     // sleep for 1/60 of a sec
                     // TODO: magic number
                     let time_per_frame_in_micro =  1.0/(60 as f32) * 1_000_000.0;
                     let frame_time = Duration::from_micros(time_per_frame_in_micro as u64);
-                    //std::thread::sleep(frame_time);
+                    std::thread::sleep(frame_time);
                 }
-                // Must call request_repaint() otherwise update() won't be triggered unless GUI event
-                // happens
-                ctx.request_repaint();
             }
+            // TODO: This is kind of kludgy, we should probably find some 
+            // other way to sync outputting once a whole frame is drawn?
+            // Draw GB screen
+            let mut is_gb_screen_open = true;
+            egui::Window::new("GB Screen").id(egui::Id::new("gbscreen"))
+                .default_width(320.0)
+                .default_height(288.0)
+                .default_pos((500.0,500.0))
+                .open(&mut is_gb_screen_open)
+                .show(ctx, |ui| {
+                    self.screen_ui(ui);
+                });
+
+            let mut is_gb_tile_screen_open = true;
+            egui::Window::new("GB Tile Data").id(egui::Id::new("gbtiledatascreen"))
+                .default_width(320.0)
+                .default_height(288.0)
+                .default_pos((0.0,500.0))
+                .open(&mut is_gb_tile_screen_open)
+                .show(ctx, |ui| {
+                    self.tile_data_screen_ui(ui);
+                });
+
+            ctx.request_repaint();
         });
     }
+
 }
 
 fn main() {
-    let options = eframe::NativeOptions::default();
+    let mut options = eframe::NativeOptions::default();
+    options.initial_window_size = Some(egui::Vec2{x:1200.0, y:1000.0}); 
 
     eframe::run_native(
         "Gameboy Emulator",

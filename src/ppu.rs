@@ -2,8 +2,8 @@ use crate::util::Shared;
 use crate::bus::Interrupts;
 
 // Gameboy is 160x144 resolution
-const SCREEN_WIDTH_PX: u8 = 160;
-const SCREEN_HEIGHT_PX: u8 = 144;
+pub const SCREEN_WIDTH_PX: u8 = 160;
+pub const SCREEN_HEIGHT_PX: u8 = 144;
 
 const DOTS_PER_LINE: u64 = 456;
 const LINES_PER_FRAME: u8 = 154;
@@ -72,6 +72,12 @@ pub struct Ppu {
                          //
                          
     pub line_buffer: Vec<u8>, // The current line we are rendering
+
+    pub frame_buffer: Vec<Vec<u8>>,
+    // TODO: This is a total kludge to sync our EGUI line display with output of new line
+    pub line_output_count: u32,
+    pub frame_output_count: u32,
+
 }
 
 
@@ -95,6 +101,10 @@ impl Ppu {
            tile_map: [0; 0x800],
            tile_data: [0; 0x1800],
            sprite_attributes: [0; 160],
+           frame_buffer: vec![vec![0; SCREEN_WIDTH_PX as usize] ; SCREEN_HEIGHT_PX as usize],
+           line_output_count: 0,
+           frame_output_count:0,
+
        }
     }
 
@@ -198,7 +208,7 @@ impl Ppu {
     }
 
     pub fn write_oam_dma(&mut self, val: u8) {
-        //println!("Ppu::write_oam_dma: {:02}", val);
+        //println!("Ppu::write_oam_dma: {:02X}", val);
     }
     pub fn do_transfer_of_line(&mut self) {
         // This is called during the transfer mode, i.e. we are rendering a line 
@@ -217,6 +227,10 @@ impl Ppu {
 
         // Copy the line to the frame buffer, converting from color palette index into actual rgb
         // color for display in GUI
+        if self.ly < SCREEN_HEIGHT_PX {
+            self.frame_buffer[self.ly as usize] = self.line_buffer.clone(); 
+        }
+        self.line_output_count = self.line_output_count.wrapping_add(1);
     }
 
     pub fn do_transfer_of_bg_or_window(&mut self) {
@@ -298,8 +312,12 @@ impl Ppu {
                 tile_data_offset -= 0x1000;
             }
 
-            // Pluck correct 2 bits from the tilemap 
-            // We extract the 2 bytes for the correct line from tile_data_offset
+            // We extract the 2 bytes for the correct line from tile_data_offset. First byte 
+            // contains the lsbits of the first row of tile, second byte contains the msbits 
+            // of the first row of file.
+            // The third byte and 4th btyte contain the second row of the tile, and so on.
+            // TODO: Need to handle bg attribute of flipping y. In this case the first and second byte is the
+            // last row of the tile.
             let tile_lsbits = self.tile_data[tile_data_offset  + tile_offset_y*2 as usize]; 
             let tile_msbits = self.tile_data[tile_data_offset + tile_offset_y*2 + 1 as usize];
 
@@ -378,6 +396,7 @@ impl Ppu {
        } else {
            if self.set_mode(PpuMode::VBlank) {
                // Set the VBlank interrupt
+               self.frame_output_count = self.frame_output_count.wrapping_add(1);
            }
        }
     }
@@ -388,6 +407,27 @@ impl Ppu {
         }
         self.mode = new_mode;        
         true
+    }
+
+
+
+    // Helper routine to display tiles 
+    pub fn get_tile_as_vec(&self, idx: u16) -> Vec<Vec<u8>> {
+        // Given a tile index grab the 2 bytes and return a 8x8  vec of the tile with color index
+        let tile_data_idx = idx as usize *  BYTES_PER_TILE as usize; // 2 bytes per tile
+
+        let mut tile: Vec<Vec<u8>> = vec![];
+        for y in 0..8 {
+            let mut row = vec![0; 8];
+            let lsbits = self.tile_data[(tile_data_idx + 2*y) as usize];
+            let msbits = self.tile_data[(tile_data_idx + 2*y+1) as usize];
+            for x in 0..8 {
+                let color = ((lsbits >> (7-x)) & 1) | ((msbits >> (7-x)) & 1) << 1;
+                row[x] = color;
+            }
+            tile.push(row);
+        }
+        tile
     }
 }
 

@@ -6,40 +6,47 @@ pub struct Bus {
     pub timer: Timer,
     pub interrupts: Shared<Interrupts>,
     pub ppu: Shared<Ppu>,
-    pub mbc: Shared<Mbc>
+    pub mbc: Shared<Mbc>,
+   
+    pub boot_rom: [u8; 256],
+    boot_rom_disabled: bool,
 }
 
 
 impl Bus {
     pub fn new(gb_rom: Shared<Vec<u8>>, boot_rom: &[u8], mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
-        let mbc = Shared::new(Mbc::new(gb_rom.clone()));
+        let mbc = Shared::new(Mbc::new(gb_rom.clone(), boot_rom));
         let mut bus =     Bus {
             mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
             mbc: mbc.clone(),
+            boot_rom: [0; 256],
+            boot_rom_disabled: false,
         };
         bus.mem[0..gb_rom.len()].copy_from_slice(&gb_rom);
-        bus.mem[0..256].copy_from_slice(boot_rom);
+        bus.boot_rom[0..256].copy_from_slice(boot_rom);
         bus
     }
 
     pub fn new_without_bootrom(gb_rom: Shared<Vec<u8>>,  mem: Shared<Vec<u8>>, interrupts: Shared<Interrupts>, ppu: Shared<Ppu>)  -> Self {
-        let mbc = Shared::new(Mbc::new(gb_rom.clone()));
+        let mbc = Shared::new(Mbc::new_without_bootrom(gb_rom.clone()));
         let mut bus =     Bus {
             mem: mem.clone(),
             timer: Timer::new(interrupts.clone()),
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
             mbc: mbc.clone(),
+            boot_rom: [0;256],
+            boot_rom_disabled: true,
         };
         bus.mem[0..gb_rom.len()].copy_from_slice(&gb_rom);
         bus
     }
 
     pub fn read8(&self, addr: u16) -> u8 {
-        let Some(val) = self.mbc.read8(addr)  else {
+        let Some(val) = self.mbc.read8(addr, self.boot_rom_disabled)  else {
             return match addr {
                 // Ppu:  tile_data, lcd regs, wy and wx 
                 0x8000..=0x9FFF | 0xFF40..=0xFF45 | 0xFF4A..=0xFF4B  => {
@@ -63,7 +70,15 @@ impl Bus {
                     self.interrupts.read8(addr)
                 },
 
-
+                0x00 ..= 0xFF => {
+                    if !self.boot_rom_disabled {
+                        //println!("boot rom read from mem: {:04X} val: {:02X}", addr, self.boot_rom[addr as usize]);
+                        self.boot_rom[addr as usize]
+                    } else {
+                        //println!("boot rom skipped from mem: {:04X} val: {:02X}", addr, self.mem[addr as usize]);
+                        self.mem[addr as usize]
+                    }
+                },
                 _ => {
                     self.mem[addr as usize]
                 }
@@ -89,17 +104,24 @@ impl Bus {
                             print!("{}",c);
                         },
                         _ => {
-                            println!("weird char: {}", c);
+                            println!("{}", c);
+                            //println!("weird char: {}", c);
                         },
                     }
                     //    self.serial.write8(addr, val);
-                }
+                },
+
                 0xFF04..=0xFF07 => {
                     self.timer.write8(addr, val);
                 },
 
                 0xFF46 => {
                     self.ppu.write_oam_dma(val);
+                },
+
+                0xFF50 => {
+                    println!("boot rom disabled: {}", val);
+                    self.boot_rom_disabled = true;
                 },
 
                 0xFFFF | 0xFF0F => {

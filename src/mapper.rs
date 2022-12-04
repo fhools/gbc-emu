@@ -5,7 +5,7 @@ pub enum MapperError {
 }
 
 pub trait Mapper {
-    fn read8(&self, addr: u16) -> Option<u8>;
+    fn read8(&self, addr: u16, boot_rom_disabled: bool) -> Option<u8>;
     fn write8(&mut self, addr: u16, val: u8) -> Result<(), MapperError>;
 }
 
@@ -20,9 +20,18 @@ pub struct Mbc {
 }
 
 impl Mapper for Mbc {
-    fn read8(&self, addr: u16) -> Option<u8> {
+    fn read8(&self, addr: u16, boot_rom_disabled: bool) -> Option<u8> {
         match addr {
-            0x0000..=0x3FFF => {
+            0x00..=0xFF => {
+                if !boot_rom_disabled {
+                    None
+                } else {
+                    //println!("boot rom disabled addr: {:04X} val:{:02X}", addr, self.rom[addr as usize]);
+                    Some(self.rom[addr as usize])
+                }
+            },
+
+            0x0100..=0x3FFF => {
                 Some(self.rom[addr as usize])
             },
 
@@ -84,7 +93,19 @@ impl Mapper for Mbc {
 }
 
 impl Mbc {
-   pub fn new(gb_rom: Shared<Vec<u8>>)  -> Self {
+   pub fn new(gb_rom: Shared<Vec<u8>>, boot_rom: &[u8])  -> Self {
+       let mut mbc = 
+        Mbc {
+            rom: gb_rom.clone(),
+            rom_select: 0,
+            ram_enabled: false,
+            ram_bank_enabled: false,
+            ram_bank_select_or_rom_bank_upper: 0,
+        };
+       mbc
+   }
+
+   pub fn new_without_bootrom(gb_rom: Shared<Vec<u8>>)  -> Self {
         Mbc {
             rom: gb_rom.clone(),
             rom_select: 0,

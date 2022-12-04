@@ -404,6 +404,9 @@ impl LR35902Cpu {
             // TODO: I think there is a bug, RGBDS website says that if IME is not set then the
             // interrupt handler is not called when CPU resumes from interrupt pending
         }
+        let pc = self.pc();
+        let opcode = self.load8(pc);
+        //println!("pc: {:04X} opcode: {:02X}", pc, opcode);
 
         if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // get ISR address
@@ -926,6 +929,7 @@ impl LR35902Cpu {
                 let  hi = self.load8(self.regs.sp) as u16;
                 self.regs.sp = self.regs.sp.wrapping_add(1);
                 let ret_addr = (hi << 8) | lo;
+                println!("reti: pc: {:04X}, returning to: {:04X}", self.pc() - 1, ret_addr);
                 self.set_pc(ret_addr);
                 // enable interrupt when returning form ISR via RETI
                 // also has 1 cycle delay
