@@ -124,7 +124,7 @@ impl Ppu {
             },
 
             0xFF40 => {
-                //println!("Ppu LCDC write: {:02X}", val);
+                println!("Ppu LCDC write: {:02X}", val);
                 self.lcdc = val;
             },
 
@@ -143,9 +143,11 @@ impl Ppu {
                 self.lyc = val;
             },
             0xFF4A => {
+                println!("write wy: {}", val);
                 self.wy = val;
             },
             0xFF4B => {
+                println!("write wx: {}", val);
                 self.wx = val;
             },
 
@@ -208,7 +210,7 @@ impl Ppu {
     }
 
     pub fn write_oam_dma(&mut self, val: u8) {
-        //println!("Ppu::write_oam_dma: {:02X}", val);
+        println!("Ppu::write_oam_dma: {:02X}", val);
     }
     pub fn do_transfer_of_line(&mut self) {
         // This is called during the transfer mode, i.e. we are rendering a line 
@@ -235,6 +237,7 @@ impl Ppu {
 
     pub fn do_transfer_of_bg_or_window(&mut self) {
 
+        let mut window_rendered = false;
         // Loop through all the pixels in the current line from 0 to SCREEN_WIDTH_PX
         for x in 0u64..(SCREEN_WIDTH_PX as u64) {
             // Are we in the window range?
@@ -252,11 +255,12 @@ impl Ppu {
             let scr_y: u64 = 
                 if self.is_window_enabled() && is_in_window_range {
                     let render_window_y = self.lwy;
-                    self.lwy += 1;
+                    window_rendered = true;
                     render_window_y
-            } else {
-                (self.ly.wrapping_add(self.scy)) as u64
-            };
+                } else {
+                    (self.ly.wrapping_add(self.scy)) as u64
+                };
+            
             // If we are inside of the window portion then we will display the window tile map
             // otherwise we only display the bg tilemap
              
@@ -271,25 +275,27 @@ impl Ppu {
 
             // From the tile map x and tile map y, find the index for the tile data
             let mut tile_data_index = tile_map_x + tile_map_y * TILE_MAP_WIDTH;
-
+            //println!("x: {}, y: {} tx: {} ty: {}", scr_x, scr_y, tile_map_x, tile_map_y);
+            //
             // Adjust the tile map index based whether we are at the window area 
             // or bg area, and whether or not the window tile map area control bit 
             // or bg tile map area control bit is set
             tile_data_index += 
-                if self.is_window_enabled() {
-                    if self.is_window_tile_map_set() {
+                //if self.is_window_enabled() && is_in_window_range {
+                if self.is_window_enabled() && is_in_window_range {
+                    if self.is_window_tile_map_bit_set() {
                         0x400
                     } else {
                         0x0
                     }
                 } else {
-                    if self.is_bg_tile_map_set() {
+                    if self.is_bg_tile_map_bit_set() {
                         0x400
                     } else {
                         0x0
                     }
                 };
-            //println!("scr_x: {}, scr_y: {}, tile_data_index: {}", scr_x, scr_y, tile_data_index);
+            //println!("scr_x: {}, scr_y: {}, tile_map_x: {} tile_map_y: {} tile_data_index: {}", scr_x, scr_y, tile_map_x, tile_map_y, tile_data_index);
             // Handle 
             // From the tile data index, find the tile data for this x and y
             let tile_data_id: usize = self.tile_map[tile_data_index as usize] as usize;
@@ -303,7 +309,7 @@ impl Ppu {
             // and whether or not the window tile data control bit or bg tile data control bit is
             // set
             tile_data_offset += 
-                if self.is_bg_tile_data_set() {
+                if self.is_bg_tile_data_bit_set() {
                     0x0
                 } else {
                     0x1000
@@ -328,9 +334,11 @@ impl Ppu {
 
             // From the color index we go into our palette and find the actual color
             let color = self.from_color_to_color_byte(color_bits);
-            self.line_buffer[scr_x as usize] = color;
+            self.line_buffer[x as usize] = color;
         }
-
+        if window_rendered {
+            self.lwy += 1;
+        }
     }
 
     pub fn do_transfer_of_sprites(&mut self) {
@@ -351,15 +359,15 @@ impl Ppu {
         (self.lcdc >> 5) & 1 == 1
     }
 
-    pub fn is_window_tile_map_set(&self) -> bool {
+    pub fn is_window_tile_map_bit_set(&self) -> bool {
         (self.lcdc >> 6) & 1 == 1
     }
 
-    pub fn is_bg_tile_map_set(&self) -> bool {
+    pub fn is_bg_tile_map_bit_set(&self) -> bool {
         (self.lcdc >> 3) & 1 == 1
     }
 
-    pub fn is_bg_tile_data_set(&self) -> bool {
+    pub fn is_bg_tile_data_bit_set(&self) -> bool {
         (self.lcdc >> 4) & 1 == 1
     }
 
@@ -395,7 +403,7 @@ impl Ppu {
             }
        } else {
            if self.set_mode(PpuMode::VBlank) {
-               // Set the VBlank interrupt
+               self.interrupts.set_int(Interrupts::INT_VBLANK);
                self.frame_output_count = self.frame_output_count.wrapping_add(1);
            }
        }

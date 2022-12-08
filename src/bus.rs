@@ -53,6 +53,11 @@ impl Bus {
                     self.ppu.read8(addr)
                 },
 
+                // Buttons
+                0xFF00 => {
+                    // Hardcode to not pressed
+                    0xFF
+                },
                 // Serial Data Transfer
                 0xFF01..=0xFF02 => {
                     //println!("serial addr: {:04X}", addr);
@@ -125,6 +130,9 @@ impl Bus {
                 },
 
                 0xFFFF | 0xFF0F => {
+                    if addr == 0xFF0F  {
+                        println!("IF wrote: {:02X}", val);
+                    }
                     self.interrupts.write8(addr, val);
                 },
                 _ => {
@@ -151,7 +159,7 @@ impl Bus {
     // not cause cycle ticks.
     pub fn hexdump(&self, start_addr: u16, len: u16) -> String {
         let mut output = String::new();
-        let words_per_line  = 4;
+        let words_per_line  = 8;
         for i in 0..len/2 {
             if i*2 + 1 > len {
                 break;
@@ -252,7 +260,10 @@ impl Default for Interrupts {
     }
 }
 impl Interrupts {
-    const INT_TIMER: u8 = 2;
+    pub const INT_TIMER: u16 = 2;
+    pub const INT_LCDSTAT: u16 = 1;
+    pub const INT_VBLANK: u16 = 0;
+
     pub fn write8(&mut self, addr: u16, val: u8) {
         match addr {
             0xFFFF => {
@@ -279,6 +290,10 @@ impl Interrupts {
                 panic!("attempt to read unknown interrupt reg: {:04X}", addr);
             }
         }
+    }
+
+    pub fn set_int(&mut self, int_num: u16) {
+        self.interrupt_flag = self.interrupt_flag | (1 << int_num);
     }
 }
 

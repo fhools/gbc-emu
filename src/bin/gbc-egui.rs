@@ -56,18 +56,18 @@ impl GbcApp {
 
 
     fn tile_data_screen_ui(&mut self, ui: &mut egui::Ui) {
-        let (response, painter) = ui.allocate_painter(Vec2::new(320.0, 288.0), Sense::hover());
+        let (response, painter) = ui.allocate_painter(Vec2::new(256.0, 384.0), Sense::hover());
 
-        let gb_screen_size = Vec2::new(160.0, 144.0);
+        let gb_screen_size = Vec2::new(128.0, 192.0);
         // create a transform to go from local space to global window space
         let to_screen = emath::RectTransform::from_to(
             Rect::from_min_size(Pos2::ZERO, gb_screen_size),
             response.rect,
             );
 
-        for j in 0..18 {
-            for i in 0..20 {
-                let tile = self.bus.ppu.get_tile_as_vec(j*20 + i);
+        for j in 0..24 {
+            for i in 0..16 {
+                let tile = self.bus.ppu.get_tile_as_vec(j*16 + i);
                 for (y,tile_row) in tile.into_iter().enumerate() {
                     for (x, color) in tile_row.into_iter().enumerate()  {
                         // output a rect that represents a pixel, coordinates are local to the window
@@ -198,10 +198,14 @@ impl GbcApp {
         code_buffer[0..prog_ldh.len()].copy_from_slice(&prog_ldh[..]);
         //code_buffer[0xFF50..0xFF50 + 2].copy_from_slice(&isr_FF50[..]);
 
-        //let rom = read_rom("/Users/fhools/Downloads/GB/Metroid2.gb").unwrap();
-        //let rom = read_rom("/Users/fhools/Downloads/GB/DonkeyKong.gb").unwrap();
-        //let rom = read_rom("/Users/fhools/Downloads/GB/Tetris/Tetris.gb").unwrap();
+        //let rom = read_rom("roms/mts-20221022/acceptance/ei_sequence.gb").unwrap();
+        //let rom = read_rom("roms/mts-20221022/emulator-only/mbc1/bits_bank2.gb").unwrap();
         let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        
+        // TODO: Definately not going to pass mem_timing right now...
+        // This is due to us ticking the bus/timer at the end of the cpu instruction execution.
+        // We should tick the bus after does its load and store cycles
+        //let rom = read_rom("roms/mem_timing.gb").unwrap();
         //let rom = read_rom("roms/01-special.gb").unwrap();
         //let rom = read_rom("roms/02-interrupts.gb").unwrap();
         //let rom = read_rom("roms/03-op-sh-hl.gb").unwrap();
@@ -228,8 +232,8 @@ impl GbcApp {
         let cpu = LR35902Cpu::new(0x0, bus.clone());
    
         GbcApp {
-            cpu: cpu,
-            bus: bus,
+            cpu,
+            bus,
             run_continuous: false,
             addr_to_dump: String::new(),
             cycles: 0,
@@ -345,7 +349,7 @@ impl eframe::App for GbcApp {
             // If user entered a hex addresss, then display hex dump
             ui.text_edit_singleline(&mut self.addr_to_dump);
             if let Ok(addr) = u16::from_str_radix(&self.addr_to_dump, 16) {
-                let membufoutput = self.cpu.bus.hexdump(addr, 16);
+                let membufoutput = self.cpu.bus.hexdump(addr, 48);
                 ui.label("memory:");
                 ui.label(membufoutput);
             }
@@ -408,7 +412,7 @@ impl eframe::App for GbcApp {
                     // TODO: magic number
                     let time_per_frame_in_micro =  1.0/(60 as f32) * 1_000_000.0;
                     let frame_time = Duration::from_micros(time_per_frame_in_micro as u64);
-                    std::thread::sleep(frame_time);
+                    //std::thread::sleep(frame_time);
                 }
             }
             // TODO: This is kind of kludgy, we should probably find some 
@@ -426,8 +430,8 @@ impl eframe::App for GbcApp {
 
             let mut is_gb_tile_screen_open = true;
             egui::Window::new("GB Tile Data").id(egui::Id::new("gbtiledatascreen"))
-                .default_width(320.0)
-                .default_height(288.0)
+                .default_width(256.0)
+                .default_height(384.0)
                 .default_pos((0.0,500.0))
                 .open(&mut is_gb_tile_screen_open)
                 .show(ctx, |ui| {

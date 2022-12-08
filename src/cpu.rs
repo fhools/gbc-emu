@@ -303,6 +303,13 @@ impl LR35902Cpu {
     }
 
     pub fn store8(&mut self, addr: u16, val: u8) {
+        // DEBUG: log ppu tile map writes
+        match addr {
+            0x9800..=0x9FFF => {
+                println!("pc: {:04X} write tile_map: {:04X} val: {} ({:02X})", self.pc() - 1, addr, val, val);
+            },
+            _ => {},
+        }
         self.bus.write8(addr, val);
     }
 
@@ -411,7 +418,7 @@ impl LR35902Cpu {
         if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // get ISR address
             let which_int = self.bus.interrupts.interrupt_flag.trailing_zeros();
-            //println!("ISR # raised: {}", which_int);
+            println!("ISR # raised: {}", which_int);
             let isr_addr = (0x0040 as u16).wrapping_add(8*which_int as u16);
             let pc = self.pc();
 
@@ -427,7 +434,7 @@ impl LR35902Cpu {
             // clear interrupt flag for the interrupt
             self.bus.interrupts.interrupt_flag = self.bus.interrupts.interrupt_flag & !((1 << which_int) as u8);
             //println!("interrupt flag is now: {:02X}", self.bus.interrupts.interrupt_flag);
-            //println!("running isr: addr: {:04X}", isr_addr);
+            println!("running isr: addr: {:04X}", isr_addr);
             self.set_pc(isr_addr);
             self.bus.tick(); 
             self.bus.tick(); 
@@ -944,8 +951,8 @@ impl LR35902Cpu {
                 let  hi = self.load8(self.regs.sp) as u16;
                 self.regs.sp = self.regs.sp.wrapping_add(1);
                 let ret_addr = (hi << 8) | lo;
+                println!("ret to: {:04X} from pc: {:04X}", ret_addr, self.pc()-1);
                 self.set_pc(ret_addr);
-                //println!("{} bytes: ret", $n);
 
                 ($n as u8, 4)
             }};
@@ -1026,8 +1033,8 @@ impl LR35902Cpu {
                 self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                 self.regs.sp = self.regs.sp.wrapping_sub(1);
                 self.store8(self.regs.sp, (self.regs.pc & 0xFF) as u8);
+                println!("pc: {:04X} rst {}", self.pc() - 1, stringify!($opr));
                 self.set_pc(rst_addr);
-                //println!("{} bytes: rst {}", $n, stringify!($opr));
                 ($n as u8, 4)
             }};
             
@@ -1043,6 +1050,7 @@ impl LR35902Cpu {
                 };
                 let mut call_cycles = 3;
                 if cond_met {
+                    println!("pc: {:04X} call {} {:04X}", self.pc()-3, condflags, addr);
                     self.regs.sp = self.regs.sp.wrapping_sub(1);
                     self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                     self.regs.sp = self.regs.sp.wrapping_sub(1);
@@ -1050,18 +1058,17 @@ impl LR35902Cpu {
                     self.set_pc(addr);
                     call_cycles = 6;
                 }
-                //println!("{} bytes: call {} {:x}", $n, condflags, addr);
                 ($n as u8, call_cycles)
             }};
             
             (call nn $n:expr) => {{
                 let addr = load!(nn);
+                println!("pc: {:04X} call {:04X}", self.pc() - 3, addr);
                 self.regs.sp = self.regs.sp.wrapping_sub(1);
                 self.store8(self.regs.sp, (self.regs.pc >> 8) as u8);
                 self.regs.sp = self.regs.sp.wrapping_sub(1);
                 self.store8(self.regs.sp, (self.regs.pc & 0xFF) as u8);
                 self.set_pc(addr);
-                //println!("{} bytes: call nn (addr:{:#X})", $n, addr);
                 ($n as u8, 6)
             }};
              
