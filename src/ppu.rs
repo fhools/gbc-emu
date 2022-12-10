@@ -1,5 +1,6 @@
 use crate::util::Shared;
 use crate::bus::Interrupts;
+use std::collections::HashMap;
 
 // Gameboy is 160x144 resolution
 pub const SCREEN_WIDTH_PX: u8 = 160;
@@ -9,7 +10,7 @@ const DOTS_PER_LINE: u64 = 456;
 const LINES_PER_FRAME: u8 = 154;
 const SEARCH_OAM_DOT_END: u64 = 80;
 const TRANSFER_OAM_DOT_END: u64 = 80 + 168;
-
+const NUM_SPRITES: usize = 40;
 
 const PX_PER_TILE: u64 = 8;
 const TILE_MAP_WIDTH: u64 = 32;
@@ -78,8 +79,18 @@ pub struct Ppu {
     pub line_output_count: u32,
     pub frame_output_count: u32,
 
+    pub bg_palette: [u8; 4],
+    pub obj_palette0: [u8; 4],
+    pub obj_palette1: [u8; 4],
 }
-
+#[derive(Debug)]
+struct Sprite {
+    pub y: u8,
+    pub x: u8,
+    pub tile_index: u8,
+    pub attr: u8,
+    pub oam_index: u8,
+}
 
 impl Ppu {
 
@@ -104,6 +115,9 @@ impl Ppu {
            frame_buffer: vec![vec![0; SCREEN_WIDTH_PX as usize] ; SCREEN_HEIGHT_PX as usize],
            line_output_count: 0,
            frame_output_count:0,
+           bg_palette: [0, 1, 2, 3],
+           obj_palette0: [0, 1, 2, 3],
+           obj_palette1: [0, 1, 2, 3],
 
        }
     }
@@ -142,12 +156,28 @@ impl Ppu {
             0xFF45 => {
                 self.lyc = val;
             },
+            0xFF47 => {
+                self.bg_palette[3] = val >> 6 & 0x3;
+                self.bg_palette[2] = val >> 4 & 0x3;
+                self.bg_palette[1] = val >> 2 & 0x3;
+                self.bg_palette[0] = val & 0x3;
+            },
+            0xFF48 => {
+                self.obj_palette0[3] = val >> 6 & 0x3;
+                self.obj_palette0[2] = val >> 4 & 0x3;
+                self.obj_palette0[1] = val >> 2 & 0x3;
+                self.obj_palette0[0] = val & 0x3;
+            },
+            0xFF49 => {
+                self.obj_palette1[3] = val >> 6 & 0x3;
+                self.obj_palette1[2] = val >> 4 & 0x3;
+                self.obj_palette1[1] = val >> 2 & 0x3;
+                self.obj_palette1[0] = val & 0x3;
+            },
             0xFF4A => {
-                println!("write wy: {}", val);
                 self.wy = val;
             },
             0xFF4B => {
-                println!("write wx: {}", val);
                 self.wx = val;
             },
 
@@ -196,6 +226,24 @@ impl Ppu {
             0xFF45 => {
                 self.lyc
             },
+            0xFF47 => {
+                self.bg_palette[3] << 6 |
+                self.bg_palette[2] << 4 |
+                self.bg_palette[1] << 2 |
+                self.bg_palette[0]
+            },
+            0xFF48 => {
+                self.obj_palette0[3] << 6 |
+                self.obj_palette0[2] << 4 |
+                self.obj_palette0[1] << 2 |
+                self.obj_palette0[0]
+            },
+            0xFF49 => {
+                self.obj_palette1[3] << 6 |
+                self.obj_palette1[2] << 4 |
+                self.obj_palette1[1] << 2 |
+                self.obj_palette1[0]
+            },
             0xFF4A => {
                 self.wy
             },
@@ -209,8 +257,15 @@ impl Ppu {
         }
     }
 
-    pub fn write_oam_dma(&mut self, val: u8) {
+    pub fn write_oam_dma(&mut self, val: u8, src: &[u8]) {
+        // The 0xFF46 register is the DMA register.
+        // Writing $XX to it will start transfer of bytes $XX00 - $XX9F
+        // to 0xFE00-0xFE9F.
+        // This transfer takes 160 cycles
         println!("Ppu::write_oam_dma: {:02X}", val);
+        for i in 0x00..=0x9F {
+            self.sprite_attributes[i as usize] = src[i];
+        }
     }
     pub fn do_transfer_of_line(&mut self) {
         // This is called during the transfer mode, i.e. we are rendering a line 
@@ -328,10 +383,11 @@ impl Ppu {
             let tile_msbits = self.tile_data[tile_data_offset + tile_offset_y*2 + 1 as usize];
 
             // We use the offset x to determine which  2 bits to combine together to get the color index
-            let color_bits = 
+            let mut color_bits = 
                 (tile_lsbits >> (7 - tile_offset_x)) & 1 |         // lower bit
                 (((tile_msbits >> (7 - tile_offset_x)) & 1) << 1);   // upper bit
 
+            color_bits = self.bg_palette[color_bits as usize];
             // From the color index we go into our palette and find the actual color
             let color = self.from_color_to_color_byte(color_bits);
             self.line_buffer[x as usize] = color;
@@ -343,6 +399,130 @@ impl Ppu {
 
     pub fn do_transfer_of_sprites(&mut self) {
         // TODO: handle sprites
+        
+        if !self.is_sprite_enabled() {
+            return
+        }
+        // Sprite attributes are in 0xFE00 - 0xFE9F
+        // There are 40 sprites taking up 160 bytes
+        // It consists of:
+        // offset           value
+        // 0                y position
+        // 1                x position
+        // 2                tile data id
+        // 3                attributes
+        //                      7 - BG/Win over sprite
+        //                      6 - y flip
+        //                      5 - x flip
+        //                      4 - palette  *non color gameboy only*
+        //                      3 - tile vram bank *color gameboy only*
+        //                      2-0 - palette *color gameboy only*
+
+        // Sprite's Y position is really position - 16
+        // Sprite's X position is really position - 8
+
+        // Ppu only displays 10 sprites on a line. Any sprites after that are
+        // ignored
+
+        // Find the first sprites, up to 10 that will be drawn on this line
+        // FIXME?: Should we move this scan to inside the main loop below? 
+        // This is due to maybe the program changing between 8x8 and 8x16 tiles midway
+        let mut candidate_sprites = vec![]; 
+        for i in 0..NUM_SPRITES {
+            let sprite_y = self.sprite_attributes[i * 4 as usize];
+            // TODO: Is this a bug if they change sprite tile mode mid way through line?
+            if self.ly >= sprite_y - 16 && self.ly < (if self.is_sprite_8x16_mode() { sprite_y } else { sprite_y - 8}) {
+                let sprite = Sprite {
+                    y: self.sprite_attributes[i*4],
+                    x: self.sprite_attributes[i*4 + 1],  
+                    tile_index: self.sprite_attributes[i*4 + 2],
+                    attr: self.sprite_attributes[i*4 + 3],
+                    oam_index: i as u8,
+                };
+                candidate_sprites.push(sprite);
+            }
+            if candidate_sprites.len() == 10 {
+                break;
+            }
+        }
+
+        if candidate_sprites.len() == 0 {
+            return;
+        } else {
+            candidate_sprites.sort_by(|s1, s2| 
+                                      if s1.x == s2.x {
+                                          s1.oam_index.cmp(&s2.oam_index)
+                                      } else {
+                                          s1.x.cmp(&s2.x)
+                                      });
+        }
+        // draw the line with any sprites on it  by walking down the line
+        // and extracing the sprite tile at that position
+        for x in 0..SCREEN_WIDTH_PX {
+
+            // loop through candidate sprites and determine which one is on this x position
+            for s in &candidate_sprites {
+                //println!("sprite: {:?}", s);
+                // is the sprite covering this position?
+                if x >= s.x - 8 && x < s.x {
+              
+                    let offset_x = x - (s.x - 8);
+                    let offset_y = self.ly - (s.y - 16);
+                    if !self.is_sprite_8x16_mode() && offset_y >= 8 {
+                        panic!("we are in 8x8 sprite mode but got y offset > 8. sprite:{:?}", s);
+                    }
+
+                    let lsbits; 
+                    let msbits;
+                    // from the y offset we get what bytes of the tile to grab
+                    // TODO: handle flipped y
+                    if offset_y >= 8 {
+                        // get tile from second 8x8 tile
+                        let offset_y: usize = offset_y as usize - 8;
+                        lsbits = self.tile_data[s.tile_index as usize * 16 + offset_y*2 + 2];
+                        msbits = self.tile_data[s.tile_index as usize * 16 + offset_y*2 + 3];
+                    } else {
+                        // normal
+                        let offset_y= offset_y as usize;
+                        lsbits = self.tile_data[s.tile_index as usize * 16 + offset_y*2 ];
+                        msbits = self.tile_data[s.tile_index as usize * 16 + offset_y*2 + 1];
+                    }
+
+                    // from the lsbits and msbits we draw the pixel for that row
+                    // if the sprite's color is 0 it is transparent, don't draw it
+                    // TODO: handle flip X 
+                    let mut color_bits = 
+                        (lsbits >> (7 - offset_x)) & 1 |         // lower bit
+                        (((msbits >> (7 - offset_x)) & 1) << 1);   // upper bit
+
+                    // From the color index we go into our palette and find the actual color
+                    if color_bits != 0 {
+                        let palette0 = s.attr >> 4 & 1 == 0;
+                        if palette0 {
+                            color_bits = self.obj_palette0[color_bits as usize];
+                        } else {
+                            color_bits = self.obj_palette1[color_bits as usize];
+                        }
+                        let color = self.from_color_to_color_byte(color_bits);
+                        self.line_buffer[x as usize] = color;
+
+
+                        // TODO: I think we should probably process all sprites 
+                        // so that 2 sprites can cover the same pixel if one sprite is transparent.
+                        break;
+                    }
+                }
+            }
+
+        }
+    }
+
+    pub fn is_sprite_8x16_mode(&self) -> bool {
+        (self.lcdc  >> 2) & 1 == 1 
+    }
+
+    pub fn is_sprite_enabled(&self) -> bool {
+        (self.lcdc >> 1) & 1 == 1
     }
 
     pub fn from_color_to_color_byte(&self, color_bits: u8) -> u8 {

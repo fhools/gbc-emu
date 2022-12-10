@@ -30,7 +30,7 @@ impl GbcApp {
     fn screen_ui(&mut self, ui: &mut egui::Ui) {
         let j: i32 = self.bus.ppu.ly as i32;
         // allocate space in the child window
-        let (response, painter) = ui.allocate_painter(Vec2::new(320.0, 288.0), Sense::hover());
+        let (response, painter) = ui.allocate_painter(Vec2::new(640.0, 576.0), Sense::hover());
 
         let gb_screen_size = Vec2::new(160.0, 144.0);
         // create a transform to go from local space to global window space
@@ -56,7 +56,7 @@ impl GbcApp {
 
 
     fn tile_data_screen_ui(&mut self, ui: &mut egui::Ui) {
-        let (response, painter) = ui.allocate_painter(Vec2::new(256.0, 384.0), Sense::hover());
+        let (response, painter) = ui.allocate_painter(Vec2::new(512.0, 768.0), Sense::hover());
 
         let gb_screen_size = Vec2::new(128.0, 192.0);
         // create a transform to go from local space to global window space
@@ -200,12 +200,14 @@ impl GbcApp {
 
         //let rom = read_rom("roms/mts-20221022/acceptance/ei_sequence.gb").unwrap();
         //let rom = read_rom("roms/mts-20221022/emulator-only/mbc1/bits_bank2.gb").unwrap();
-        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        //let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         
         // TODO: Definately not going to pass mem_timing right now...
         // This is due to us ticking the bus/timer at the end of the cpu instruction execution.
         // We should tick the bus after does its load and store cycles
         //let rom = read_rom("roms/mem_timing.gb").unwrap();
+
+
         //let rom = read_rom("roms/01-special.gb").unwrap();
         //let rom = read_rom("roms/02-interrupts.gb").unwrap();
         //let rom = read_rom("roms/03-op-sh-hl.gb").unwrap();
@@ -420,8 +422,8 @@ impl eframe::App for GbcApp {
             // Draw GB screen
             let mut is_gb_screen_open = true;
             egui::Window::new("GB Screen").id(egui::Id::new("gbscreen"))
-                .default_width(320.0)
-                .default_height(288.0)
+                .default_width(640.0)
+                .default_height(576.0)
                 .default_pos((500.0,500.0))
                 .open(&mut is_gb_screen_open)
                 .show(ctx, |ui| {
@@ -430,8 +432,8 @@ impl eframe::App for GbcApp {
 
             let mut is_gb_tile_screen_open = true;
             egui::Window::new("GB Tile Data").id(egui::Id::new("gbtiledatascreen"))
-                .default_width(256.0)
-                .default_height(384.0)
+                .default_width(512.0)
+                .default_height(768.0)
                 .default_pos((0.0,500.0))
                 .open(&mut is_gb_tile_screen_open)
                 .show(ctx, |ui| {

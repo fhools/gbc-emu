@@ -49,7 +49,7 @@ impl Bus {
         let Some(val) = self.mbc.read8(addr, self.boot_rom_disabled)  else {
             return match addr {
                 // Ppu:  tile_data, lcd regs, wy and wx 
-                0x8000..=0x9FFF | 0xFF40..=0xFF45 | 0xFF4A..=0xFF4B  => {
+                0x8000..=0x9FFF | 0xFE00..=0xFE9F | 0xFF40..=0xFF45 | 0xFF47..=0xFF49 | 0xFF4A..=0xFF4B  => {
                     self.ppu.read8(addr)
                 },
 
@@ -95,7 +95,7 @@ impl Bus {
     pub fn write8(&mut self, addr: u16, val: u8) {
         let Ok(_) =  self.mbc.write8(addr, val) else {
             match addr {
-                0x8000..=0x9FFF | 0xFF40..=0xFF43 | 0xFF45 | 0xFF4A..=0xFF4B => {
+                0x8000..=0x9FFF | 0xFE00..=0xFE9F | 0xFF40..=0xFF43 | 0xFF45 | 0xFF47..=0xFF49 | 0xFF4A..=0xFF4B => {
                     self.ppu.write8(addr, val);
                 },
 
@@ -121,7 +121,16 @@ impl Bus {
                 },
 
                 0xFF46 => {
-                    self.ppu.write_oam_dma(val);
+                    // Get copy of data from $XX00 to $XX9F
+                    let mut source = vec![];
+                    let start_addr = (val as u16) << 8;
+
+                    // TODO: can we pass in a slice directly instead of copying 
+                    // the data to a vec?
+                    for i in 0u16..=0x9F {
+                        source.push(self.read8(start_addr + i))
+                    }
+                    self.ppu.write_oam_dma(val, &source[..]);
                 },
 
                 0xFF50 => {
