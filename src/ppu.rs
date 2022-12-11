@@ -262,7 +262,7 @@ impl Ppu {
         // Writing $XX to it will start transfer of bytes $XX00 - $XX9F
         // to 0xFE00-0xFE9F.
         // This transfer takes 160 cycles
-        println!("Ppu::write_oam_dma: {:02X}", val);
+        //println!("Ppu::write_oam_dma: {:02X}", val);
         for i in 0x00..=0x9F {
             self.sprite_attributes[i as usize] = src[i];
         }

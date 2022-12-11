@@ -7,7 +7,8 @@ pub struct Bus {
     pub interrupts: Shared<Interrupts>,
     pub ppu: Shared<Ppu>,
     pub mbc: Shared<Mbc>,
-   
+    pub input: InputButtons, 
+    pub prev_input: InputButtons,
     pub boot_rom: [u8; 256],
     boot_rom_disabled: bool,
 }
@@ -22,6 +23,8 @@ impl Bus {
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
             mbc: mbc.clone(),
+            input: Default::default(),
+            prev_input: Default::default(),
             boot_rom: [0; 256],
             boot_rom_disabled: false,
         };
@@ -38,6 +41,8 @@ impl Bus {
             interrupts: interrupts.clone(),
             ppu: ppu.clone(),
             mbc: mbc.clone(),
+            input: Default::default(),
+            prev_input: Default::default(),
             boot_rom: [0;256],
             boot_rom_disabled: true,
         };
@@ -55,8 +60,23 @@ impl Bus {
 
                 // Buttons
                 0xFF00 => {
-                    // Hardcode to not pressed
-                    0xFF
+                    if !self.input.not_select_action {
+                        let button = !self.input.key_a as u8 | 
+                                     (!self.input.key_b as u8) << 1 | 
+                                     (!self.input.key_select as u8) << 2 |
+                                     (!self.input.key_start as u8) << 3 | 
+                                     (!self.input.not_select_direction as u8) << 4 | 
+                                     (!self.input.not_select_action as u8) << 5;
+                        button
+                    } else {
+                        let button = !self.input.key_right as u8 | 
+                                     (!self.input.key_left as u8) << 1 | 
+                                     (!self.input.key_up as u8) << 2 |
+                                     (!self.input.key_down as u8) << 3 | 
+                                     (!self.input.not_select_direction as u8) << 4 | 
+                                     (!self.input.not_select_action as u8) << 5;
+                        button
+                    }
                 },
                 // Serial Data Transfer
                 0xFF01..=0xFF02 => {
@@ -99,6 +119,12 @@ impl Bus {
                     self.ppu.write8(addr, val);
                 },
 
+                0xFF00 => {
+                    let input = self.read8(0xFF00);
+                    self.input.not_select_action = (val >> 5) & 1 == 1;
+                    self.input.not_select_direction = (val >> 4) & 1 == 1;
+                }
+
                 0xFF01 => {
                     //println!("serial addr: {:04X}, val: {:02X}", addr, val);
                     let c = val as char;
@@ -140,7 +166,7 @@ impl Bus {
 
                 0xFFFF | 0xFF0F => {
                     if addr == 0xFF0F  {
-                        println!("IF wrote: {:02X}", val);
+                        //println!("IF wrote: {:02X}", val);
                     }
                     self.interrupts.write8(addr, val);
                 },
@@ -160,6 +186,16 @@ impl Bus {
         for _ in 0..4 {
             self.ppu.tick();
         }
+    }
+
+    pub fn set_input(&mut self, input: &InputButtons) {
+        self.prev_input = self.input.clone();
+        let mut new_input = input.clone();
+        new_input.not_select_action = self.prev_input.not_select_action;
+        new_input.not_select_direction = self.prev_input.not_select_direction;
+        self.input = new_input;
+        
+        //TODO: Compare current input with previous input and set interrupt flags 
     }
 
     // Display memory address. All addresses go through the BUS
@@ -425,4 +461,33 @@ impl Timer {
             }
         }
     }
+}
+
+// Gameboy Buttons
+//
+// Programs will set bit 5 or 4 then read bits 0-3
+// Bit 7 - Not used
+// Bit 6 - Not used
+// Bit 5 - P15 Select Action buttons    (0=Select)
+// Bit 4 - P14 Select Direction buttons (0=Select)
+// Bit 3 - P13 Input: Down  or Start    (0=Pressed) (Read Only)
+// Bit 2 - P12 Input: Up    or Select   (0=Pressed) (Read Only)
+// Bit 1 - P11 Input: Left  or B        (0=Pressed) (Read Only)
+// Bit 0 - P10 Input: Right or A        (0=Pressed) (Read Only)
+
+#[derive(Default, Debug, Clone)]
+pub struct InputButtons {
+
+    pub key_up: bool,
+    pub key_down: bool,
+    pub key_left: bool,
+    pub key_right: bool,
+    pub key_a: bool,
+    pub key_b: bool,
+    pub key_start: bool,
+    pub key_select: bool,
+
+    // write-able
+    pub not_select_action: bool,        // 0 = selected! thats why such a weird name
+    pub not_select_direction: bool,     // ditto
 }

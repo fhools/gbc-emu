@@ -84,9 +84,21 @@ impl GbcApp {
         }
     }
 
+    fn get_input(&mut self, ctx: &egui::Context) -> bus::InputButtons {
+        let mut button_inputs: bus::InputButtons = Default::default();
+        button_inputs.key_up = ctx.input().key_down(egui::Key::ArrowUp);
+        button_inputs.key_down = ctx.input().key_down(egui::Key::ArrowDown);
+        button_inputs.key_left = ctx.input().key_down(egui::Key::ArrowLeft);
+        button_inputs.key_right = ctx.input().key_down(egui::Key::ArrowRight);
+        button_inputs.key_a = ctx.input().key_down(egui::Key::A);
+        button_inputs.key_b = ctx.input().key_down(egui::Key::B);
+        button_inputs.key_select = ctx.input().key_down(egui::Key::Space);
+        button_inputs.key_start = ctx.input().key_down(egui::Key::Enter);
+        button_inputs
+    }
+
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
-
 
         // Setup a small program to test interrupts
         let main_program = [0x00, // nop
@@ -200,7 +212,7 @@ impl GbcApp {
 
         //let rom = read_rom("roms/mts-20221022/acceptance/ei_sequence.gb").unwrap();
         //let rom = read_rom("roms/mts-20221022/emulator-only/mbc1/bits_bank2.gb").unwrap();
-        //let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
         
         // TODO: Definately not going to pass mem_timing right now...
         // This is due to us ticking the bus/timer at the end of the cpu instruction execution.
@@ -274,8 +286,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     // Start with the default fonts (we will be adding to them rather than replacing them).
     let mut fonts = egui::FontDefinitions::default();
 
-    // Install my own font (maybe supporting non-latin characters).
-    // .ttf and .otf files supported.
+    // We want fixed width font to display hex dumps 
     // TODO: create some kind of $RESOURCE_DIR env variable to store fonts
     fonts.font_data.insert(
         "my_font".to_owned(),
@@ -302,23 +313,17 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+
 fn show_instr(app: &GbcApp, pc: u16) -> String {
     let opcode = app.cpu.load8(pc);
     let (_, disasm) = app.cpu.disasm(opcode);
     format!("{}", disasm)
 }
 
-// TODO:
-// This is  actually running really slowly, I think its due to us running our emulator inside of
-// egui update().
-// We should actually have our own main loop, inside our loop we should run
-// our emulator. Then we should manually call egui to execute the gui portion.
-// I believe egui update() is throttled by the host computer refresh rate.
-// Which kind of explains we are only being called at 60 fps.
-//
 impl eframe::App for GbcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
+
             ui.heading("Gameboy Emulator");
 
             // Display CPU registers
@@ -367,9 +372,12 @@ impl eframe::App for GbcApp {
                     }
                 }
             });
-           
-            // Prime line output tracking
-            let mut line_output_count = self.bus.ppu.line_output_count;
+
+            // Grab the input state and send button state to the Bus.
+            // This is where the emulation maps host keyboard to gameboy buttons gets done
+            let button_input = self.get_input(ctx);
+            self.cpu.bus.set_input(&button_input);
+
             // Enable/Disable continous running
             ui.checkbox(&mut self.run_continuous, "Run");
             if  self.run_continuous {
@@ -417,14 +425,13 @@ impl eframe::App for GbcApp {
                     //std::thread::sleep(frame_time);
                 }
             }
-            // TODO: This is kind of kludgy, we should probably find some 
-            // other way to sync outputting once a whole frame is drawn?
+
             // Draw GB screen
             let mut is_gb_screen_open = true;
             egui::Window::new("GB Screen").id(egui::Id::new("gbscreen"))
                 .default_width(640.0)
                 .default_height(576.0)
-                .default_pos((500.0,500.0))
+                .default_pos((0.0,600.0))
                 .open(&mut is_gb_screen_open)
                 .show(ctx, |ui| {
                     self.screen_ui(ui);
@@ -434,7 +441,7 @@ impl eframe::App for GbcApp {
             egui::Window::new("GB Tile Data").id(egui::Id::new("gbtiledatascreen"))
                 .default_width(512.0)
                 .default_height(768.0)
-                .default_pos((0.0,500.0))
+                .default_pos((700.0,400.0))
                 .open(&mut is_gb_tile_screen_open)
                 .show(ctx, |ui| {
                     self.tile_data_screen_ui(ui);
@@ -448,7 +455,7 @@ impl eframe::App for GbcApp {
 
 fn main() {
     let mut options = eframe::NativeOptions::default();
-    options.initial_window_size = Some(egui::Vec2{x:1200.0, y:1000.0}); 
+    options.initial_window_size = Some(egui::Vec2{x:1400.0, y:1200.0}); 
 
     eframe::run_native(
         "Gameboy Emulator",
