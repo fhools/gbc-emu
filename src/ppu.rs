@@ -1,6 +1,5 @@
 use crate::util::Shared;
 use crate::bus::Interrupts;
-use std::collections::HashMap;
 
 // Gameboy is 160x144 resolution
 pub const SCREEN_WIDTH_PX: u8 = 160;

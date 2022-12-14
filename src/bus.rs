@@ -195,7 +195,16 @@ impl Bus {
         new_input.not_select_direction = self.prev_input.not_select_direction;
         self.input = new_input;
         
-        //TODO: Compare current input with previous input and set interrupt flags 
+        if !self.prev_input.key_a && self.input.key_a ||
+            !self.prev_input.key_b && self.input.key_b ||
+                !self.prev_input.key_select && self.input.key_select ||
+                !self.prev_input.key_start && self.input.key_start ||
+                !self.prev_input.key_up && self.input.key_up ||
+                !self.prev_input.key_down && self.input.key_down ||
+                !self.prev_input.key_left && self.input.key_left ||
+                !self.prev_input.key_right && self.input.key_right {
+                    self.interrupts.interrupt_flag = self.interrupts.interrupt_flag | (1 << 4);
+                }
     }
 
     // Display memory address. All addresses go through the BUS
