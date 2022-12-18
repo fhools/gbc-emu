@@ -5,12 +5,14 @@ It uses the excellent [egui](https://github.com/emilk/egui/) framework for UI.
 # How to run it.
 The emulator runs from the command-line. 
 
-Rom is selected via --rom argument
+Rom is selected via `--rom` argument
 
+```
 --rom <ROM FILE>
+```
 
 ```code
-cargo run --release --bin gbc-emu-egui -- --rom ROM.gb
+cargo run --release --bin gbc-emu-egui -- --rom Tetris.gb
 ```
 
 ## Input
