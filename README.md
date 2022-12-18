@@ -11,9 +11,13 @@ Rom is selected via --rom argument
 
 ## Input
 Up/Down/Left/Right = Arrow keys
+
 A button = A Key
+
 B button = B Key
+
 Start = Enter Key 
+
 Select = Spacebar
 
 ```code
