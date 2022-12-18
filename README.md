@@ -9,6 +9,10 @@ Rom is selected via --rom argument
 
 --rom <ROM FILE>
 
+```code
+cargo run --release --bin gbc-emu-egui -- --rom ROM.gb
+```
+
 ## Input
 Up/Down/Left/Right = Arrow keys
 
@@ -19,10 +23,6 @@ B button = B Key
 Start = Enter Key 
 
 Select = Spacebar
-
-```code
-cargo run --release --bin gbc-emu-egui -- --rom ROM.gb
-```
 
 # Resources
 Here are the resources that have been used while developing the emulator.
