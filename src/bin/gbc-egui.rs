@@ -4,8 +4,12 @@ use gbc_emu::ppu::{self, Ppu};
 use gbc_emu::rom::read_rom;
 use gbc_emu::util::Shared;
 use gbc_emu::bootrom::BOOT_ROM;
+
 use eframe::egui;
 use egui::*;
+
+use clap::Parser;
+
 use std::time::Duration;
 
 struct GbcApp {
@@ -92,12 +96,12 @@ impl GbcApp {
         button_inputs
     }
 
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, args: GbcAppArgs) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
         //let rom = read_rom("roms/mts-20221022/acceptance/ei_sequence.gb").unwrap();
         //let rom = read_rom("roms/mts-20221022/emulator-only/mbc1/bits_bank2.gb").unwrap();
-        let rom = read_rom("roms/cpu_instrs.gb").unwrap();
+        let rom = read_rom(args.rom).unwrap();
         
         // TODO: Definately not going to pass mem_timing right now...
         // This is due to us ticking the bus/timer at the end of the cpu instruction execution.
@@ -337,14 +341,22 @@ impl eframe::App for GbcApp {
 
 }
 
+#[derive(Parser, Debug)]
+struct GbcAppArgs {
+    #[arg(short, long)]
+    rom: String,
+}
+
 fn main() {
+    let args = GbcAppArgs::parse();
+
     let mut options = eframe::NativeOptions::default();
     options.initial_window_size = Some(egui::Vec2{x:1400.0, y:1200.0}); 
 
     eframe::run_native(
         "Gameboy Emulator",
         options,
-        Box::new(|cc| Box::new(GbcApp::new(cc))),
+        Box::new(|cc| Box::new(GbcApp::new(cc, args))),
         );
 }
 

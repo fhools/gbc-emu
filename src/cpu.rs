@@ -7,25 +7,6 @@ impl<const V: u8> ConstEval<V> {
     pub const VALUE: u8 = V;
 }
 
-/*
- * Blargg's cpu test
- *
- * [OK] 01-special
- * [  ] 02-interrupts
- * [OK] 03-op, sp,hl 
- *      NOTE: fixed ld (nn), sp! it loads the 16 bit value of sp onto address specified by nn. i
- *      was incorrectly loading 8 bit value of the top of stack value! 
- * [OK] 04-op r, imm
- * [OK] 05 op, rp 
- * [OK] 06-op ld r,r
- * [OK] 07-jr-jp-call-ret-rst
- *      NOTE: Was not passing due to bad ld (nn), sp implementation 
- * [OK] 08-op misc
- *      NOTE: Was not passing due to bad ld (nn), sp implementation
- * [OK] 09-op r,r
- * [OK] 10-bit ops
- * [OK] 11-op a,(hl)
- */
 
 /* This method of generating opcode handler is similar to tgbr's method 
  * use_z80_opcodes specifies a table of instructions and will call a 
@@ -400,20 +381,11 @@ impl LR35902Cpu {
         self.bus.interrupts.prev_ime = self.bus.interrupts.ime;
 
         // if interrupt enabled and we got a interrupt pending
-        if self.halted  {
-            if (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
-                if prev_ime {
-                    self.halted = false;
-                } else {
-                    self.halted = false;
-                }
-            } 
+        if self.halted && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // TODO: I think there is a bug, RGBDS website says that if IME is not set then the
             // interrupt handler is not called when CPU resumes from interrupt pending
-        }
-        let pc = self.pc();
-        let opcode = self.load8(pc);
-        //println!("pc: {:04X} opcode: {:02X}", pc, opcode);
+            self.halted = false;
+        } 
 
         if prev_ime && (self.bus.interrupts.interrupt_enable_reg  & self.bus.interrupts.interrupt_flag) != 0 {
             // get ISR address
