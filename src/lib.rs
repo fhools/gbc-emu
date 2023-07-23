@@ -6,3 +6,4 @@ pub mod bus;
 pub mod ppu;
 pub mod bootrom;
 pub mod mapper;
+pub mod apu;
